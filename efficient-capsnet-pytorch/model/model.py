@@ -20,7 +20,7 @@ class EfficientCapsNet(nn.Module):
         self.bn4 = nn.BatchNorm2d(128)
 
         self.primary_caps = PrimaryCaps(
-            in_channels=128, kernel_size=9, capsule_size=(16, 8)
+            in_channels=128, kernel_size=11, capsule_size=(16, 8)
         )
         self.routing_caps = RoutingCaps(in_capsules=(16, 8), out_capsules=(10, 16))
         self.len_final_caps = CapsLen()
