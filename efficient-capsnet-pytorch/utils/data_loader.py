@@ -1,5 +1,3 @@
-import os
-import pickle
 from typing import Any, Callable
 
 import cv2
@@ -8,7 +6,7 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as Ft
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 from torchvision import datasets, transforms
@@ -294,98 +292,22 @@ class MnistDataLoader(BaseDataLoader):
         return img
 
 
-class CIFAR100Dataset(Dataset):
-    """CIFAR-100 dataset loaded directly from the raw pickled batch files.
+class Cifar10DataLoader(BaseDataLoader):
+    """CIFAR-10 data loading class, built on `torchvision.datasets.CIFAR10`.
 
-    Expects the following directory structure::
-
-        data_dir/
-            meta
-            train
-            test
+    `data_dir` must be the *parent* directory that contains the
+    `cifar-10-batches-py` folder (torchvision appends that folder name
+    itself) -- e.g. if your data lives at `project/cifar-10-batches-py/`,
+    pass `data_dir='project/'`.
 
     Attributes:
-        classes (list[str]): Human-readable names for each label, ordered by
-            label index. Coarse (superclass) or fine, depending on `coarse`.
-        data (np.ndarray): Image data of shape (N, 32, 32, 3), dtype uint8.
-        labels (np.ndarray): Integer labels of shape (N,).
+        num_classes (int): Number of classes (10).
+        dataset (Dataset): The CIFAR-10 dataset.
     """
 
-    def __init__(
-        self,
-        data_dir: str,
-        train: bool = True,
-        coarse: bool = False,
-        transform: Callable | None = None,
-        target_transform: Callable | None = None,
-    ):
-        """Initialize the dataset by reading the CIFAR-100 pickle files.
-
-        Args:
-            data_dir (str): Directory containing the `meta`, `train`, and
-                `test` pickle files.
-            train (bool, optional): Whether to load the training split
-                (`train` file) or the test split (`test` file). Defaults to True.
-            coarse (bool, optional): Whether to use the 20 coarse superclass
-                labels instead of the 100 fine labels. Defaults to False.
-            transform (Callable, optional): Transform applied to each PIL image.
-            target_transform (Callable, optional): Transform applied to each
-                integer label.
-        """
-        self.transform = transform
-        self.target_transform = target_transform
-        self.coarse = coarse
-
-        split_file = "train" if train else "test"
-        data_dict = self._unpickle(os.path.join(data_dir, split_file))
-        meta_dict = self._unpickle(os.path.join(data_dir, "meta"))
-
-        label_names_key = b"coarse_label_names" if coarse else b"fine_label_names"
-        self.classes = [name.decode("utf-8") for name in meta_dict[label_names_key]]
-
-        # raw data is (N, 3072): 1024 R, 1024 G, 1024 B -> (N, 3, 32, 32) -> (N, 32, 32, 3)
-        raw = data_dict[b"data"]
-        self.data = raw.reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
-
-        label_key = b"coarse_labels" if coarse else b"fine_labels"
-        self.labels = np.array(data_dict[label_key])
-
-    @staticmethod
-    def _unpickle(file_path: str) -> dict:
-        """Load a CIFAR-100 pickle file as a byte-keyed dictionary."""
-        with open(file_path, "rb") as fo:
-            return pickle.load(fo, encoding="bytes")
-
-    def __len__(self) -> int:
-        return len(self.data)
-
-    def __getitem__(self, idx: int) -> tuple[Any, Any]:
-        img = Image.fromarray(self.data[idx])
-        label = int(self.labels[idx])
-
-        if self.transform is not None:
-            img = self.transform(img)
-        if self.target_transform is not None:
-            label = self.target_transform(label)
-
-        return img, label
-
-
-class Cifar100DataLoader(BaseDataLoader):
-    """CIFAR-100 data loading class.
-
-    Loads CIFAR-100 from the raw pickled batch files (`meta`, `train`, `test`)
-    rather than via `torchvision.datasets.CIFAR100`, so `data_dir` should point
-    directly at the folder containing those three files.
-
-    Attributes:
-        num_classes (int): Number of classes (20 if `coarse`, else 100).
-        dataset (Dataset): The CIFAR-100 dataset.
-    """
-
-    # Per-channel mean/std computed over the CIFAR-100 training set.
-    CIFAR100_MEAN = (0.5071, 0.4865, 0.4409)
-    CIFAR100_STD = (0.2673, 0.2564, 0.2762)
+    # Per-channel mean/std computed over the CIFAR-10 training set.
+    CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
+    CIFAR10_STD = (0.2470, 0.2435, 0.2616)
 
     def __init__(
         self,
@@ -395,17 +317,16 @@ class Cifar100DataLoader(BaseDataLoader):
         validation_split: int | float = 0.0,
         num_workers: int = 1,
         training: bool = True,
-        coarse: bool = False,
     ):
-        """Initializes the Cifar100DataLoader with the given parameters.
+        """Initializes the Cifar10DataLoader with the given parameters.
 
         Standard augmentation (random crop + horizontal flip) is applied for
         the training split; only normalization is applied otherwise. Labels
         are one-hot encoded, matching MnistDataLoader's output convention.
 
         Args:
-            data_dir (str): Directory containing the `meta`, `train`, and
-                `test` files (e.g. "project/cifar100").
+            data_dir (str): Parent directory containing the
+                `cifar-10-batches-py` folder.
             batch_size (int): Number of samples per batch.
             shuffle (bool, optional): Whether to shuffle the data every epoch.
                 Defaults to True.
@@ -416,10 +337,8 @@ class Cifar100DataLoader(BaseDataLoader):
                 loading. Defaults to 1.
             training (bool, optional): Whether to load the training split
                 (with augmentation) or the test split. Defaults to True.
-            coarse (bool, optional): Whether to use the 20 coarse superclass
-                labels instead of the 100 fine labels. Defaults to False.
         """
-        self.num_classes = 20 if coarse else 100
+        self.num_classes = 10
 
         if training:
             image_transform = transforms.Compose(
@@ -427,23 +346,23 @@ class Cifar100DataLoader(BaseDataLoader):
                     transforms.RandomCrop(32, padding=4),
                     transforms.RandomHorizontalFlip(),
                     transforms.ToTensor(),
-                    transforms.Normalize(self.CIFAR100_MEAN, self.CIFAR100_STD),
+                    transforms.Normalize(self.CIFAR10_MEAN, self.CIFAR10_STD),
                 ]
             )
         else:
             image_transform = transforms.Compose(
                 [
                     transforms.ToTensor(),
-                    transforms.Normalize(self.CIFAR100_MEAN, self.CIFAR100_STD),
+                    transforms.Normalize(self.CIFAR10_MEAN, self.CIFAR10_STD),
                 ]
             )
 
         label_transform = transforms.Lambda(self.one_hot_encode)
 
-        self.dataset = CIFAR100Dataset(
+        self.dataset = datasets.CIFAR10(
             data_dir,
             train=training,
-            coarse=coarse,
+            download=True,
             transform=image_transform,
             target_transform=label_transform,
         )

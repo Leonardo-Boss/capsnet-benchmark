@@ -1,18 +1,17 @@
 main:
-  name: 'ecaps_cifar100'
+  name: 'ecaps_cifar10'
   seed: 22
   cuda: True
   verbosity: 0  # 0: debug, 1: info, 2: warning, 3: error
 
 data_loader:
-  type: 'Cifar100DataLoader'
+  type: 'Cifar10DataLoader'
   args: # see utils/data_loader.py
-    data_dir: 'cifar100/'  # folder containing meta/train/test
+    data_dir: '../'  # parent dir containing the cifar-10-batches-py folder
     batch_size: 16
     shuffle: True
     validation_split: 0.1
     num_workers: 1
-    coarse: False  # False: 100 fine classes, True: 20 coarse superclasses
 
 arch:
   type: 'FinalCapsNet'
