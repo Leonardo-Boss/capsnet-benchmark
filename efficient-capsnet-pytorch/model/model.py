@@ -6,7 +6,7 @@ from .layers import CapsLen, CapsMask, PrimaryCaps, RoutingCaps
 
 
 class EfficientCapsNet(nn.Module):
-    def __init__(self, input_size=(3, 32, 32)):
+    def __init__(self, input_size=(3, 32, 32), num_classes=10, capsule_dim=16):
         super(EfficientCapsNet, self).__init__()
         self.conv1 = nn.Conv2d(
             in_channels=input_size[0], out_channels=32, kernel_size=5, padding=0
@@ -22,7 +22,7 @@ class EfficientCapsNet(nn.Module):
         self.primary_caps = PrimaryCaps(
             in_channels=128, kernel_size=11, capsule_size=(16, 8)
         )
-        self.routing_caps = RoutingCaps(in_capsules=(16, 8), out_capsules=(10, 16))
+        self.routing_caps = RoutingCaps(in_capsules=(16, 8), out_capsules=(num_classes, capsule_dim))
         self.len_final_caps = CapsLen()
         self.reset_parameters()
 
@@ -64,17 +64,38 @@ class ReconstructionNet(nn.Module):
 
 
 class FinalCapsNet(nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        input_size=(3, 32, 32),
+        num_classes=10,
+        capsule_dim=16,
+        use_background_class=False
+    ):
         super(FinalCapsNet, self).__init__()
-        self.efficient_capsnet = EfficientCapsNet()
+
+        self.num_classes = num_classes
+        self.use_background_class = use_background_class
+
+        n_out_caps = num_classes + 1 if use_background_class else num_classes
+
+        self.efficient_capsnet = EfficientCapsNet(input_size, n_out_caps, capsule_dim)
+
         self.mask = CapsMask()
-        self.generator = ReconstructionNet()
+        self.generator = ReconstructionNet(input_size, n_out_caps, capsule_dim)
 
     def forward(self, x, y_true=None, mode='train'):
         x, x_len = self.efficient_capsnet(x)
         if mode == "train":
+            if self.use_background_class:
+                # background capsule is never a training target -- pad the
+                # one-hot label with a 0 so shapes line up for masking
+                bg_col = torch.zeros_like(y_true[:, :1])
+                y_mask = torch.cat([y_true, bg_col], dim=1)
+            else:
+                y_mask = y_true
             masked = self.mask(x, y_true)
         elif mode == "eval":
             masked = self.mask(x)
         x = self.generator(masked)
-        return x, x_len
+        digit_len = x_len[:, : self.num_classes]
+        return x, digit_len
