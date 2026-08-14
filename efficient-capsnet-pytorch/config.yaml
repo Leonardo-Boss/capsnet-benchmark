@@ -1,17 +1,18 @@
 main:
-  name: 'ecaps_mnist'
+  name: 'ecaps_cifar100'
   seed: 22
   cuda: True
   verbosity: 0  # 0: debug, 1: info, 2: warning, 3: error
 
 data_loader:
-  type: 'MnistDataLoader'
+  type: 'Cifar100DataLoader'
   args: # see utils/data_loader.py
-    data_dir: 'data/'
+    data_dir: 'cifar100/'  # folder containing meta/train/test
     batch_size: 16
     shuffle: True
     validation_split: 0.1
     num_workers: 1
+    coarse: False  # False: 100 fine classes, True: 20 coarse superclasses
 
 arch:
   type: 'FinalCapsNet'
