@@ -6,7 +6,7 @@ from .layers import CapsLen, CapsMask, PrimaryCaps, RoutingCaps
 
 
 class EfficientCapsNet(nn.Module):
-    def __init__(self, input_size=(1, 28, 28)):
+    def __init__(self, input_size=(3, 28, 28)):
         super(EfficientCapsNet, self).__init__()
         self.conv1 = nn.Conv2d(
             in_channels=input_size[0], out_channels=32, kernel_size=5, padding=0
