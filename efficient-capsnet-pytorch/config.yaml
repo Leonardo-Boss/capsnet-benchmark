@@ -16,7 +16,7 @@ data_loader:
 arch:
   type: 'FinalCapsNet'
   args: # see model/model.py
-    use_background_class: False
+    use_background_class: True
 optimizer:
   type: 'Adam'
   args: # see torch.optim

@@ -93,7 +93,7 @@ class FinalCapsNet(nn.Module):
                 y_mask = torch.cat([y_true, bg_col], dim=1)
             else:
                 y_mask = y_true
-            masked = self.mask(x, y_true)
+            masked = self.mask(x, y_mask)
         elif mode == "eval":
             masked = self.mask(x)
         x = self.generator(masked)
