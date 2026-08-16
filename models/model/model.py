@@ -1,4 +1,5 @@
 import numpy as np
+import timm
 import torch
 import torch.nn as nn
 
@@ -99,3 +100,74 @@ class FinalCapsNet(nn.Module):
         x = self.generator(masked)
         digit_len = x_len[:, : self.num_classes]
         return x, digit_len
+
+class TimmClassifier(nn.Module):
+    """Adapter that exposes any timm classification model through the same
+    forward(x, y_true=None, mode='train') -> (recon, logits) interface the
+    trainer expects. Optionally applies the standard CIFAR-scale
+    adaptations for ResNets and ViT/DeiT models built for 224x224 inputs.
+    """
+    def __init__(
+        self,
+        model_name,
+        num_classes=10,
+        pretrained=False,
+        cifar_stem=False,
+        patch_size=None,
+        img_size=None,
+        **timm_kwargs,
+    ):
+        """
+        Args:
+            model_name: any timm model name, e.g. 'resnet18', 'deit_tiny_patch16_224'.
+            num_classes: number of output classes.
+            pretrained: load ImageNet weights (usually False when also
+                changing input resolution/patch size -- shapes won't match).
+            cifar_stem: if True, replaces a ResNet-style 7x7 stride-2 stem +
+                maxpool with a 3x3 stride-1 conv and no maxpool, per the
+                standard CIFAR adaptation (see e.g. He et al.-style repos).
+                Only applies to models with a `.conv1`/`.maxpool` (ResNet family).
+            patch_size: override ViT/DeiT patch size (e.g. 4 for 32x32 inputs
+                instead of the default 16). Ignored for non-patch models.
+            img_size: override the input resolution the model was built for
+                (needed alongside patch_size so position embeddings are sized
+                correctly). Ignored for non-patch models.
+        """
+        super().__init__()
+        if patch_size is not None:
+            timm_kwargs["patch_size"] = patch_size
+        if img_size is not None:
+            timm_kwargs["img_size"] = img_size
+
+        self.backbone = timm.create_model(
+            model_name, pretrained=pretrained, num_classes=num_classes, **timm_kwargs
+        )
+
+        if cifar_stem:
+            self._apply_cifar_stem()
+
+    def _apply_cifar_stem(self):
+        if not hasattr(self.backbone, "conv1"):
+            raise ValueError(
+                "cifar_stem=True expects a ResNet-style model with a "
+                "'.conv1' stem (e.g. 'resnet18', 'resnet34', 'resnet50')."
+            )
+        old_conv1 = self.backbone.conv1
+        self.backbone.conv1 = nn.Conv2d(
+            in_channels=old_conv1.in_channels,
+            out_channels=old_conv1.out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=False,
+        )
+        nn.init.kaiming_normal_(
+            self.backbone.conv1.weight, mode="fan_out", nonlinearity="relu"
+        )
+        # replace the stride-2 maxpool with a no-op so 32x32 isn't
+        # downsampled to 8x8 before the first residual block even runs
+        self.backbone.maxpool = nn.Identity()
+
+    def forward(self, x, y_true=None, mode='train'):
+        logits = self.backbone(x)
+        return x, logits  # ClassificationLoss ignores the echoed image

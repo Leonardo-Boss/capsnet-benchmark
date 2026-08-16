@@ -1,0 +1,15 @@
+\begin{table}
+\caption{Model comparison summary.}
+\label{tab:model-comparison}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llrrrrrrrrrr}
+\toprule
+Model & Primary metric & Best value & Best epoch & Epochs trained & Final train\_loss & Total elapsed (h) & Avg epoch time (s) & Peak mem (MB) & GMACs & Params (M) & Checkpoint (MB) \\
+\midrule
+FFDSM & val\_map50 & 0.091700 & 125 & 129 & 0.223100 & 10.040000 & 280.300000 & 4831.900000 & 9.271000 & 9.240000 & 70.600000 \\
+TFNet & val\_map50 & 0.049300 & 40 & 200 & 0.573100 & 44.050000 & 793.000000 & 3236.400000 & 31.656000 & 30.450000 & 348.700000 \\
+ResCapsTCAttnFire & val\_f1 & 0.793100 & 19 & 20 & 0.290100 & 10.510000 & 1892.600000 & 3522.400000 & 4.633000 & 2.220000 & 25.500000 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

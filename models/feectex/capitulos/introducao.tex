@@ -1,0 +1,32 @@
+%!TeX root = ../principal.tex
+%!TeX encoding = utf-8
+\chapter{Introdução}
+\label{intro}
+
+Os incêndios florestais constituem um problema de grande relevância ambiental, social e econômico, uma vez que podem provocar a destruição de ecossistemas, perda de biodiversidade, emissão de poluentes atmosféricos e danos materiais. A identificação rápida de focos de incêndio é, portanto, fundamental para possibilitar uma resposta antecipada e reduzir a extensão dos danos provocados pelo fogo. Nesse contexto, sistemas automatizados de monitoramento baseados em imagens apresentam-se como uma alternativa aos métodos tradicionais de detecção, possibilitando a utilização de câmeras e outros dispositivos de aquisição de imagens para identificar automaticamente características visuais associadas à presença de fogo e fumaça.
+
+O avanço das técnicas de Inteligência Artificial (IA), especialmente do aprendizado profundo (\textit{Deep Learning}), possibilitou o desenvolvimento de modelos capazes de aprender automaticamente características relevantes a partir de imagens. Entre essas técnicas, as Redes Neurais Convolucionais (\textit{Convolutional Neural Networks} -- CNNs) apresentam ampla utilização em problemas de visão computacional, incluindo a detecção de incêndios florestais.
+
+Entre as principais abordagens encontradas na literatura para a detecção de incêndios florestais utilizando imagens, destacam-se modelos de detecção baseados em arquiteturas convolucionais, como a família \textit{You Only Look Once} (YOLO), modelos baseados em \textit{Transformers}, como o RT-DETR, e abordagens que utilizam redes de cápsulas (\textit{Capsule Networks}). Essas abordagens empregam diferentes estratégias de representação e extração de características para identificar padrões visuais associados ao fogo e à fumaça, sendo exploradas na literatura com diferentes mecanismos de atenção, fusão multiescalar e técnicas de processamento das características.
+
+Embora trabalhos da literatura apresentem resultados promissores, seus desempenhos não podem ser comparados diretamente, pois utilizam diferentes conjuntos de dados, pré-processamentos, configurações de treinamento e métricas. Assim, as diferenças observadas podem estar relacionadas tanto às arquiteturas quanto às condições experimentais adotadas.
+
+Diante desse cenário, torna-se relevante realizar uma avaliação controlada de diferentes abordagens existentes na literatura. Ao utilizar um mesmo conjunto de dados para todos os modelos, juntamente com procedimentos padronizados de treinamento e avaliação, é possível reduzir a influência de fatores externos à arquitetura e realizar uma comparação mais direta entre os métodos. Essa abordagem permite investigar se os ganhos de desempenho apresentados individualmente pelos trabalhos permanecem quando os modelos são adaptados, quando necessário, para uma tarefa experimental comum, mantendo-se, tanto quanto possível, os componentes fundamentais das arquiteturas originais.
+Assim, esta pesquisa tem como objetivo implementar e avaliar diferentes modelos de Inteligência Artificial propostos na literatura para a detecção de incêndios florestais utilizando imagens. Os modelos selecionados representam diferentes abordagens encontradas na literatura, incluindo arquiteturas baseadas em CNNs e YOLO, modelos baseados em Transformers e redes de cápsulas. Todos os modelos são treinados utilizando um único conjunto de dados \citar{dfire} e avaliados a partir de um protocolo experimental comum, permitindo uma comparação direta de seus resultados.
+
+Dessa forma, a questão central desta pesquisa é: \textit{qual das abordagens de Inteligência Artificial selecionadas da literatura apresenta o melhor desempenho para a detecção de incêndios florestais quando os diferentes modelos são implementados, treinados e avaliados utilizando o mesmo conjunto de dados e condições experimentais?}
+
+Para responder a essa questão, são estabelecidas as seguintes questões de pesquisa:
+
+\begin{itemize}
+\item Quais são as principais abordagens de Inteligência Artificial utilizadas na literatura para a detecção de incêndios florestais utilizando imagens?
+
+\item Quais características e mecanismos são empregados pelos diferentes modelos para melhorar a detecção de fogo e fumaça?
+
+\item Como os diferentes modelos se comportam quando treinados e avaliados utilizando o mesmo conjunto de dados e protocolo experimental?
+
+\item Qual dos modelos avaliados apresenta o melhor desempenho preditivo sob condições experimentais equivalentes?
+
+\item Qual é o compromisso entre desempenho preditivo e custo computacional apresentado pelas diferentes abordagens?
+
+\end{itemize}

@@ -1,0 +1,147 @@
+% Comparação dos Modelos
+
+\chapter{Comparação dos Modelos}
+
+Os três modelos avaliados apresentam diferenças consideráveis tanto em desempenho
+quanto em custo computacional. A Tabela~\ref{tab:model-comparison} apresenta as principais
+medidas obtidas durante os experimentos.
+
+\input{summary\_table.tex}
+
+A comparação das métricas de validação deve ser feita com cautela. O FFDSM e o
+TFNet reportam \textit{val\_map50}, enquanto o ResCapsTCAttnFire reporta
+\textit{val\_f1}. Portanto, os valores dessas métricas não constituem uma
+comparação direta de desempenho preditivo. Dentro das métricas de mesmo tipo, o
+FFDSM atingiu um melhor valor de \textit{mAP50} de 0.0917, enquanto o
+TFNet atingiu 0.0493. O ResCapsTCAttnFire atingiu F1 de 0.7931, mas esse
+resultado deve ser interpretado separadamente devido à diferença de métrica.
+
+\section{Eficiência computacional}
+
+A Figura~\ref{fig:efficiency} apresenta a comparação entre os modelos em termos
+de GMACs, memória de pico, tempo médio por época e número de parâmetros.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{efficiency.png}
+\caption{Comparação da eficiência computacional dos modelos.}
+\label{fig:efficiency}
+\end{figure}
+
+O ResCapsTCAttnFire apresenta a menor quantidade de operações, com 4.633 GMACs,
+e também o menor número de parâmetros, com 2.22 milhões. O FFDSM possui 9.271
+GMACs e 9.24 milhões de parâmetros, enquanto o TFNet possui 31.656 GMACs
+e 30.45 milhões de parâmetros. Assim, em termos de tamanho da arquitetura e
+quantidade de operações, o ResCapsTCAttnFire apresenta a menor complexidade entre
+os três modelos.
+
+O consumo de memória apresenta um comportamento diferente. O TFNet
+apresenta o menor pico de memória, com 3236.4 MB, seguido pelo
+ResCapsTCAttnFire, com 3522.4 MB, e pelo FFDSM, com 4831.9 MB. Dessa forma, a
+menor quantidade de parâmetros e GMACs do ResCapsTCAttnFire não se traduz
+diretamente em menor utilização de memória durante o treinamento.
+
+Em relação ao tempo médio por época, o FFDSM apresenta o menor valor, com
+280.3 s por época. O TFNet apresenta 793.0 s, enquanto o
+ResCapsTCAttnFire apresenta 1892.6 s por época. Isso mostra que a quantidade de
+GMACs e de parâmetros, isoladamente, não é suficiente para explicar o tempo real
+de execução observado durante o treinamento.
+
+\section{Tempo de treinamento}
+
+O tempo total de treinamento também deve ser considerado juntamente com o número
+de épocas executadas. O FFDSM foi treinado por 129 épocas e apresentou um tempo
+total de 10.04 horas. O TFNet foi treinado por 200 épocas e levou
+44.05 horas. O ResCapsTCAttnFire, por sua vez, foi treinado por apenas 20 épocas
+e apresentou um tempo total de 10.51 horas.
+
+Apesar de o ResCapsTCAttnFire possuir o maior tempo médio por época, seu
+treinamento completo apresentou duração semelhante à do FFDSM devido ao número
+consideravelmente menor de épocas. O TFNet apresentou o maior tempo total
+de treinamento, associado tanto ao elevado tempo por época quanto ao maior número
+de épocas executadas.
+
+\section{Métrica de validação}
+
+A evolução da métrica de validação reportada para cada modelo é apresentada na
+Figura~\ref{fig:metrics}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{metric\_curves.png}
+\caption{Evolução da métrica de validação reportada por cada modelo.}
+\label{fig:metrics}
+\end{figure}
+
+O FFDSM apresenta uma evolução bastante instável de \textit{val\_map50}, com
+oscilações consideráveis ao longo do treinamento. Apesar disso, observa-se uma
+tendência geral de crescimento, atingindo o melhor valor de 0.0917 na época 125.
+
+O TFNet apresenta oscilações ainda mais pronunciadas. Seu melhor valor de
+\textit{val\_map50} foi 0.0493 na época 40. Após esse ponto, a métrica não
+apresenta uma melhora consistente até o final do treinamento.
+
+O ResCapsTCAttnFire apresenta comportamento diferente dos outros dois modelos,
+uma vez que sua métrica reportada é F1. A curva apresenta uma tendência geral de
+crescimento, partindo de aproximadamente 0.66 e chegando a 0.7931 na época 19.
+Embora existam algumas quedas intermediárias, a evolução geral da métrica é
+positiva ao longo das 20 épocas.
+
+\section{Evolução da perda de treinamento}
+
+A evolução da perda durante o treinamento é apresentada na
+Figura~\ref{fig:loss}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{loss\_curves.png}
+\caption{Evolução da perda de treinamento dos modelos.}
+\label{fig:loss}
+\end{figure}
+
+Os três modelos apresentam redução da perda durante o treinamento. O FFDSM
+apresenta uma queda acentuada nas primeiras épocas, seguida por uma redução mais
+gradual, atingindo uma perda final de aproximadamente 0.2231.
+
+O ResCapsTCAttnFire também apresenta uma redução rápida da perda, chegando a
+aproximadamente 0.2901 ao final das 20 épocas. Já o TFNet apresenta uma
+redução mais lenta e permanece em aproximadamente 0.5731 ao final das 200 épocas.
+
+Entretanto, os valores absolutos da perda não devem ser utilizados isoladamente
+para determinar qual arquitetura apresenta melhor desempenho, especialmente caso
+as funções de perda ou os procedimentos de treinamento utilizados pelos modelos
+não sejam idênticos.
+
+\section{Discussão}
+
+Os resultados mostram diferentes compromissos entre complexidade computacional,
+tempo de treinamento e desempenho de validação.
+
+O ResCapsTCAttnFire apresenta a menor quantidade de parâmetros e GMACs entre os
+três modelos. Seu número de parâmetros é aproximadamente 2.22 milhões, contra
+9.24 milhões do FFDSM e 30.45 milhões do TFNet. Entretanto, essa
+vantagem não se traduz em menor tempo por época: o ResCapsTCAttnFire apresenta
+1892.6 s por época, aproximadamente 6.8 vezes o tempo observado para o FFDSM.
+Esse comportamento indica que a contagem de GMACs não captura necessariamente
+todos os fatores responsáveis pelo tempo efetivo de execução de uma arquitetura.
+
+O FFDSM apresenta um compromisso diferente. Ele possui o menor tempo médio por
+época entre os três modelos e, entre os modelos que reportam \textit{mAP50},
+atingiu o maior valor observado, 0.0917. Seu principal custo computacional é o
+maior pico de memória, de 4831.9 MB.
+
+O TFNet apresenta 30.45 milhões de parâmetros e 31.656 GMACs, sendo o
+modelo com maior complexidade computacional segundo essas duas medidas. Também
+apresenta o maior tempo total de treinamento, 44.05 horas. Apesar de possuir o
+menor pico de memória dos três modelos, com 3236.4 MB, seu \textit{mAP50} máximo
+foi 0.0493.
+
+É importante destacar que os resultados de F1 e mAP50 não devem ser comparados
+numericamente como se fossem a mesma métrica. Assim, os dados permitem uma
+comparação direta de eficiência computacional, mas a comparação de desempenho
+preditivo entre os três modelos é limitada pela utilização de métricas diferentes.
+
+Para uma comparação definitiva de desempenho, seria necessário avaliar os três
+modelos sob o mesmo conjunto de validação, utilizando a mesma métrica e,
+idealmente, o mesmo protocolo experimental.
+

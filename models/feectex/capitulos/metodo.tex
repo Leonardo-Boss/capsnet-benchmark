@@ -1,0 +1,92 @@
+%!TeX root = ../principal.tex
+%!TeX encoding = utf-8
+\chapter{Método}
+\label{metodo}
+\section{Busca}
+Como base de dados foram usados IEEE Xplore, ACM Digital Library, Scopus, SpringerLink, and Wiley Online Library.
+Em cada uma dessas bases foi executada a seguinte string de busca:
+\begin{verbatim}
+(
+    ("forest smoke" OR "forest fire")
+    AND ("detection" OR "identification")
+    AND ("image*" OR "video*" OR "vision*")
+    AND NOT "survey" AND NOT "review"
+    AND ("AI" OR "ML" OR "machine learning")
+)
+\end{verbatim}
+Foram escolhidos apenas artigos de 2020-2025.
+Foram excluídos artigos que não podem ser acessados gratuitamente.
+Artigos encontrados:
+\begin{table}[h]
+\centering
+\begin{tabular}{ |l c| }
+    \hline
+    IEEE Xplore &  8 \\
+    \hline
+    ACM &  9 \\
+    \hline
+    Scopus & 23 \\
+    \hline
+    SpringerLink & 51 \\
+    \hline
+    Wiley & 20 \\
+    \hline
+\end{tabular}
+\caption{Artigos encontrados pela string de busca}
+\label{found_papers}
+\end{table}
+
+Em seguida foram classificados. Em tipo de pesquisa (secundária ou primária), se é sobre Detecção de incêndio florestal usando inteligência artificial (sim, não, null), tipo de imagem (estacionária, drone, satélite, video, null) e.
+\begin{table}[h]
+\centering
+\begin{tabular}{ |l c| }
+    \hline
+    Primária & 101 \\
+    \hline
+    Secundária & 10 \\
+    \hline
+\end{tabular}
+\caption{Tipo de pesquisa}
+\label{research_type}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ |l c| }
+    \hline
+    Sim & 28 \\
+    \hline
+    Não & 74 \\
+    \hline
+    NULL & 9 \\
+    \hline
+\end{tabular}
+\caption{É sobre Detecção de incêndio florestal usando inteligência artificial, nulos foram eliminados por serem pesquisa secundária antes de serem classificados nesta categoria.}
+\label{isaboutforestfire}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ |l c| }
+    \hline
+    drone & 9 \\
+    \hline
+    estacionária & 10 \\
+    \hline
+    satélite & 8 \\
+    \hline
+    video & 10 \\
+    \hline
+    NULL & 74 \\
+    \hline
+\end{tabular}
+\caption{Tipo de imagem, nulos foram eliminados pelas categorias anteriores antes de serem classificados nesta.}
+\label{isaboutforestfire}
+\end{table}
+
+Foram excluídos os artigos que são pesquisa secundária, não são sobre detecção de incêndio florestal usando inteligência artificial e usam tipo de imagem diferente de drone ou estacionária. Após isso sobraram 16 artigos, desses foram escolhidos um de cada de tipo de IA dando prioridade aqueles que providenciam códigos e dados. Finalmente sobrando 10 artigos.
+
+\section{Treinamento}
+Treinamos cada modelo por aproximadamente 10 horas usando o Dataset D-Fire \citar{dfire}, Foi usado o loss inicial fornecido em cada paper e um decaimento de loss usando uma curva sigmoide seguindo a quantidade de épocas nos respectivos papers.
+
+Do dataset usamos a divisão de traino (X imagens), validação (X imagens) e teste (X imagens) fornecidos pelo próprio dataset. Para o TFNet foram excluídas todas as imagens (X imagens) que não contém objetos, pois imagens sem objetos atrapalham imensamente o treinamento de models baseados no RT-DETR.

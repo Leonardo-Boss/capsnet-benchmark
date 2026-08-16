@@ -37,3 +37,15 @@ class TotalLoss(nn.Module):
         margin = self.margin_loss(targets, digit_probs)
         recon = self.recon_loss(reconstructions, input_images)
         return margin + self.recon_factor * recon
+
+class ClassificationLoss(nn.Module):
+    """Plain cross-entropy, exposed with TotalLoss's call signature so it's
+    a drop-in replacement in config.yaml for non-capsule backbones.
+    input_images/reconstructions are accepted but unused.
+    """
+    def __init__(self):
+        super().__init__()
+        self.ce = nn.CrossEntropyLoss()
+
+    def forward(self, input_images, targets, reconstructions, digit_probs):
+        return self.ce(digit_probs, targets)
