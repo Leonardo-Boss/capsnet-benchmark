@@ -1,0 +1,72 @@
+main:
+  name: resnet18_cifar_10
+  seed: 1
+  cuda: true
+  verbosity: 0
+arch:
+  type: TimmClassifier
+  args:
+    model_name: resnet18
+    num_classes: 10
+    pretrained: false
+    cifar_stem: true
+loss:
+  type: ClassificationLoss
+  args: {}
+data_loader:
+  type: Cifar10DataLoader
+  args:
+    data_dir: ../
+    batch_size: 16
+    shuffle: true
+    validation_split: 0.1
+    num_workers: 1
+    augmentation: strong
+    data_fraction: 0.33
+optimizer:
+  type: Adam
+  args:
+    lr: 0.0005
+lr_scheduler:
+  type: ExponentialLR
+  args:
+    gamma: 0.98
+metrics:
+- accuracy
+trainer:
+  epochs: 100
+  log_step: 1700
+  save_dir: saved/
+  save_period: 10
+  verbosity: 0
+  monitor: min val_loss
+  early_stop: -5
+  tensorboard: true
+logger:
+  version: 1
+  disable_existing_loggers: false
+  formatters:
+    brief:
+      format: '%(message)s'
+    precise:
+      format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+      datefmt: '%Y-%m-%d %H:%M:%S'
+  handlers:
+    console:
+      class: logging.StreamHandler
+      level: DEBUG
+      formatter: brief
+      stream: ext://sys.stdout
+    file:
+      class: logging.handlers.RotatingFileHandler
+      level: INFO
+      formatter: precise
+      filename: info.log
+      maxBytes: 1000000.0
+      backupCount: 5
+      encoding: utf8
+  root:
+    level: INFO
+    handlers:
+    - console
+    - file
