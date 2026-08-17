@@ -309,6 +309,8 @@ class Cifar10DataLoader(BaseDataLoader):
     CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
     CIFAR10_STD = (0.2470, 0.2435, 0.2616)
 
+    AUGMENTATION_LEVELS = ("none", "standard", "strong")
+
     def __init__(
         self,
         data_dir: str,
@@ -317,6 +319,7 @@ class Cifar10DataLoader(BaseDataLoader):
         validation_split: int | float = 0.0,
         num_workers: int = 1,
         training: bool = True,
+        augmentation: str = "standard",
     ):
         """Initializes the Cifar10DataLoader with the given parameters.
 
@@ -337,18 +340,24 @@ class Cifar10DataLoader(BaseDataLoader):
                 loading. Defaults to 1.
             training (bool, optional): Whether to load the training split
                 (with augmentation) or the test split. Defaults to True.
+            augmentation (str, optional): Training-time augmentation regime.
+                One of "none" (no augmentation), "standard" (random crop +
+                horizontal flip + rotation +/-15deg), or "strong" (standard +
+                RandAugment + Random Erasing). Ignored when training=False --
+                the eval/test split is always just normalized. Defaults to
+                "standard".
         """
         self.num_classes = 10
 
-        if training:
-            image_transform = transforms.Compose(
-                [
-                    transforms.RandomCrop(32, padding=4),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                    transforms.Normalize(self.CIFAR10_MEAN, self.CIFAR10_STD),
-                ]
+        augmentation = augmentation.lower()
+        if augmentation not in self.AUGMENTATION_LEVELS:
+            raise ValueError(
+                f"Unknown augmentation level '{augmentation}'. "
+                f"Expected one of {self.AUGMENTATION_LEVELS}."
             )
+
+        if training:
+            image_transform = self._build_train_transform(augmentation)
         else:
             image_transform = transforms.Compose(
                 [
@@ -370,6 +379,30 @@ class Cifar10DataLoader(BaseDataLoader):
         super().__init__(
             self.dataset, batch_size, shuffle, validation_split, num_workers
         )
+
+    def _build_train_transform(self, augmentation: str) -> transforms.Compose:
+        """Build the training-time augmentation pipeline for a given level."""
+        ops = []
+
+        if augmentation in ("standard", "strong"):
+            ops += [
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(15),  # +/- 15 degrees
+            ]
+
+        if augmentation == "strong":
+            ops.append(transforms.RandAugment())  # operates on PIL images
+
+        ops += [
+            transforms.ToTensor(),
+            transforms.Normalize(self.CIFAR10_MEAN, self.CIFAR10_STD),
+        ]
+
+        if augmentation == "strong":
+            ops.append(transforms.RandomErasing())  # operates on tensors
+
+        return transforms.Compose(ops)
 
     def one_hot_encode(self, label: int) -> torch.Tensor:
         """Transforms the given label into a one-hot encoded tensor."""

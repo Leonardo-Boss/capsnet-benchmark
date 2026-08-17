@@ -65,6 +65,8 @@ def main(cfg: Config) -> None:
         valid_data_loader=valid_data_loader,
     )
 
+    # reseed so augmentations are the same independent of the model
+    torch.manual_seed(seed)
     trainer.train()
 
 

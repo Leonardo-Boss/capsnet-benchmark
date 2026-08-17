@@ -1,9 +1,10 @@
 from abc import abstractmethod
 from typing import Callable
+import hashlib
 
 import torch
 from torch.utils.data import DataLoader
-from torchvision.utils import make_grid
+from torchvision.utils import make_grid, save_image
 
 from .config import Config
 from .logger import MetricTracker, TensorboardWriter, get_logger
@@ -226,6 +227,8 @@ class MnistTrainer(BaseTrainer):
             "loss", *[m.__name__ for m in metric_fns], writer=self.writer
         )
         self.n_batch = len(self.train_loader)
+        self.aug_check: bool = self.config["trainer"].get("aug_check", False)
+        self.aug_check_batches: int = self.config["trainer"].get("aug_check_batches", 2)
 
     def _train_epoch(self, epoch: int) -> dict:
         """Train the model for one epoch.
@@ -244,6 +247,21 @@ class MnistTrainer(BaseTrainer):
             # configure data and optimizer
             images = images.to(self.device)
             labels = labels.to(self.device)
+
+            # check if augmentations are deterministic
+            if self.aug_check and epoch == self.start_epoch and batch_idx < self.aug_check_batches:
+                check_hash = hashlib.sha256(
+                    images.detach().cpu().numpy().tobytes()
+                ).hexdigest()[:12]
+                self.logger.info(
+                    "Augmentation check -- epoch %d batch %d hash: %s",
+                    epoch, batch_idx, check_hash,
+                )
+                save_image(
+                    make_grid(images[:16].cpu(), nrow=4, normalize=True),
+                    self.config.log_dir / f"aug_check_ep{epoch}_batch{batch_idx}.png",
+                )
+
             self.optimizer.zero_grad()  # zero the gradients
 
             # forward and backward pass

@@ -12,6 +12,7 @@ data_loader:
     shuffle: True
     validation_split: 0.1
     num_workers: 1
+    augmentation: 'none'  # 'none' | 'standard' | 'strong'
 
 arch:
   type: 'FinalCapsNet'
