@@ -116,6 +116,8 @@ class BaseTrainer:
         not_improved_count = 0
         for epoch in range(self.start_epoch, self.n_epoch + 1):
             epoch_start = time.time()
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
 
             epoch_log = {"epoch": epoch}
             result = self._train_epoch(epoch)
@@ -126,6 +128,10 @@ class BaseTrainer:
             # CSV/checkpoint I/O below
             epoch_log["timestamp"] = datetime.now().strftime(r"%Y-%m-%d %H:%M:%S")
             epoch_log["epoch_time_sec"] = round(time.time() - epoch_start, 2)
+            epoch_log["max_mem_mb"] = (
+                round(torch.cuda.max_memory_allocated() / (1024**2), 2)
+                if torch.cuda.is_available() else None
+            )
 
             # print logged information to the screen
             for key, value in epoch_log.items():

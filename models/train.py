@@ -11,6 +11,7 @@ from utils.config import Config
 from utils.trainer import MnistTrainer
 from utils.logger import get_logger
 from utils.tools import find_latest_checkpoint
+from utils.profiling import log_model_complexity
 
 
 def main(cfg: Config) -> None:
@@ -41,6 +42,11 @@ def main(cfg: Config) -> None:
     model = cfg.init_obj("arch", module_arch)
     model = model.to(device)
     logger.info("Model set up  : %s", type(model).__name__)
+
+    # report model size and compute cost
+    sample_images, _ = next(iter(train_data_loader))
+    input_size = tuple(sample_images.shape[1:])  # e.g. (3, 32, 32)
+    log_model_complexity(model, input_size, device, logger)
 
     # build optimizer
     trainable_params = filter(lambda p: p.requires_grad, model.parameters())
