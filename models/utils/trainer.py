@@ -1,3 +1,5 @@
+import time
+from datetime import datetime
 from abc import abstractmethod
 from typing import Callable
 from pathlib import Path
@@ -113,9 +115,17 @@ class BaseTrainer:
 
         not_improved_count = 0
         for epoch in range(self.start_epoch, self.n_epoch + 1):
+            epoch_start = time.time()
+
             epoch_log = {"epoch": epoch}
             result = self._train_epoch(epoch)
             epoch_log.update(result)
+
+            # timing -- added after _train_epoch so it reflects the actual
+            # time spent training + validating this epoch, not including
+            # CSV/checkpoint I/O below
+            epoch_log["timestamp"] = datetime.now().strftime(r"%Y-%m-%d %H:%M:%S")
+            epoch_log["epoch_time_sec"] = round(time.time() - epoch_start, 2)
 
             # print logged information to the screen
             for key, value in epoch_log.items():
