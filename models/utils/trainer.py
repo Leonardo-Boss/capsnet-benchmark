@@ -150,16 +150,19 @@ class BaseTrainer:
                     break
 
             # save model checkpoint
-            if epoch % self.save_period == 0:
-                self._save_checkpoint(epoch, save_best=best)
+            save_periodic = epoch % self.save_period == 0
+            if best or save_periodic:
+                self._save_checkpoint(epoch, save_best=best, save_periodic=save_periodic)
 
-    def _save_checkpoint(self, epoch: int, save_best: bool = False) -> None:
+    def _save_checkpoint(self, epoch: int, save_best: bool = False, save_periodic: bool = True) -> None:
         """Save the current model checkpoint.
 
         Args:
             epoch (int): The current epoch number.
             save_best (bool, optional): Whether to save this checkpoint as the
                 best so far. Defaults to False.
+            save_periodic (bool, optional): Whether to save the regular,
+                epoch-numbered checkpoint file. Defaults to True.
         """
         arch = type(self.model).__name__
         state = {
@@ -170,9 +173,10 @@ class BaseTrainer:
             "monitor_best": self.mnt_best,
             "config": self.config,
         }
-        fname = str(self.checkpoint_dir / f"ep{epoch}.pth")
-        torch.save(state, fname)
-        self.logger.info("Checkpoint saved: %s ...", fname)
+        if save_periodic:
+            fname = str(self.checkpoint_dir / f"ep{epoch}.pth")
+            torch.save(state, fname)
+            self.logger.info("Checkpoint saved: %s ...", fname)
 
         if save_best:  # save as the best yet
             best_fname = str(self.checkpoint_dir / "model_best.pth")
