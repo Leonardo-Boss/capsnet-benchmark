@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Type
 
 from .logger import global_logger_setup
-from .tools import read_yaml
+from .tools import read_yaml, write_yaml
 
 
 class Config:
@@ -39,6 +39,7 @@ class Config:
         exist_ok = run_id == ""
         self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
         self.log_dir.mkdir(parents=True, exist_ok=exist_ok)
+        write_yaml(self.config, self.save_dir / "config.yaml")
 
         # setup logging
         global_logger_setup(self.config["logger"], self.log_dir)
