@@ -36,9 +36,8 @@ class Config:
         self._save_dir: Path = save_dir / "models" / exp_name / run_id
         self._log_dir: Path = save_dir / "log" / exp_name / run_id
 
-        exist_ok = run_id == ""
-        self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
-        self.log_dir.mkdir(parents=True, exist_ok=exist_ok)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
         write_yaml(self.config, self.save_dir / "config.yaml")
 
         # setup logging

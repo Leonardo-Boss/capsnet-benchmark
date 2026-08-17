@@ -1,14 +1,16 @@
 from abc import abstractmethod
 from typing import Callable
+from pathlib import Path
 import hashlib
 
 import torch
 from torch.utils.data import DataLoader
 from torchvision.utils import make_grid, save_image
+import torch.nn.functional as F
+
 
 from .config import Config
-from .logger import MetricTracker, TensorboardWriter, get_logger
-
+from .logger import MetricTracker, TensorboardWriter, get_logger, CSVLogger, ConfusionTracker
 
 class BaseTrainer:
     """Custom base class for all trainers.
@@ -105,6 +107,10 @@ class BaseTrainer:
         Raises:
             KeyError: If the specified metric for monitoring is not found in the log.
         """
+        csv_logger = CSVLogger(
+            self.config.log_dir / "metrics.csv", reset=(self.start_epoch == 1)
+        )
+
         not_improved_count = 0
         for epoch in range(self.start_epoch, self.n_epoch + 1):
             epoch_log = {"epoch": epoch}
@@ -114,6 +120,8 @@ class BaseTrainer:
             # print logged information to the screen
             for key, value in epoch_log.items():
                 self.logger.info("   {:15s}: {}".format(str(key), value))
+
+            csv_logger.log(epoch_log)
 
             # monitor best performance and perform early stopping
             best = False
@@ -183,6 +191,40 @@ class BaseTrainer:
             torch.save(state, best_fname)
             self.logger.info("Best checkpoint saved: %s ...", best_fname)
 
+    def _resume_checkpoint(self, resume_path: str | Path) -> None:
+        """Resume training from a saved checkpoint.
+
+        Restores the model weights, optimizer state, the epoch to resume from,
+        and the best-monitored-metric-so-far, so training continues as if it
+        had never stopped.
+
+        Args:
+            resume_path (str | Path): Path to the checkpoint file to resume from.
+        """
+        resume_path = str(resume_path)
+        self.logger.info("Loading checkpoint: %s ...", resume_path)
+
+        device = next(self.model.parameters()).device
+        checkpoint = torch.load(resume_path, map_location=device)
+
+        if checkpoint["arch"] != type(self.model).__name__:
+            self.logger.warning(
+                "Checkpoint architecture '%s' does not match the currently "
+                "configured architecture '%s'. Loading may fail or silently "
+                "produce incorrect results.",
+                checkpoint["arch"],
+                type(self.model).__name__,
+            )
+
+        self.model.load_state_dict(checkpoint["state_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.start_epoch = checkpoint["epoch"] + 1
+        self.mnt_best = checkpoint.get("monitor_best", self.mnt_best)
+
+        self.logger.info(
+            "Checkpoint loaded. Resuming training from epoch %d", self.start_epoch
+        )
+
 
 class MnistTrainer(BaseTrainer):
     """Custom trainer for the MNIST dataset, validation included.
@@ -230,6 +272,9 @@ class MnistTrainer(BaseTrainer):
         self.valid_metrics = MetricTracker(
             "loss", *[m.__name__ for m in metric_fns], writer=self.writer
         )
+        num_classes = self.train_loader.dataset[0][1].shape[0]  # from one-hot label
+        self.train_confusion = ConfusionTracker(num_classes)
+        self.valid_confusion = ConfusionTracker(num_classes)
         self.n_batch = len(self.train_loader)
         self.aug_check: bool = self.config["trainer"].get("aug_check", False)
         self.aug_check_batches: int = self.config["trainer"].get("aug_check_batches", 2)
@@ -246,6 +291,7 @@ class MnistTrainer(BaseTrainer):
         """
         self.model.train()  # set the model to training mode
         self.train_metrics.reset()
+        self.train_confusion.reset()
 
         for batch_idx, (images, labels) in enumerate(self.train_loader):
             # configure data and optimizer
@@ -284,6 +330,9 @@ class MnistTrainer(BaseTrainer):
             for metric in self.metric_fns:
                 self.train_metrics.update(metric.__name__, metric(label, out_label))
 
+            pred_onehot = F.one_hot(out_label, num_classes=labels.shape[1])
+            self.train_confusion.update(labels, pred_onehot)
+
             # log training information
             if batch_idx % self.log_step == 0 or batch_idx == len(self.train_loader):
                 self.logger.debug(self._progress(epoch, batch_idx, loss.item()))
@@ -292,7 +341,8 @@ class MnistTrainer(BaseTrainer):
                     "input", make_grid(images.cpu(), nrow=8, normalize=True)
                 )
 
-        epoch_log = self.train_metrics.result()
+        epoch_log = {**self.train_metrics.result(), **self.train_confusion.result()}
+
 
         # validate the model, if provided
         if self.valid_loader is not None:
@@ -317,6 +367,7 @@ class MnistTrainer(BaseTrainer):
         """
         self.model.eval()  # set the model to evaluation mode
         self.valid_metrics.reset()
+        self.valid_confusion.reset()
 
         with torch.no_grad():
             for batch_idx, (images, labels) in enumerate(self.valid_loader):
@@ -340,11 +391,14 @@ class MnistTrainer(BaseTrainer):
                 for metric in self.metric_fns:
                     self.valid_metrics.update(metric.__name__, metric(label, out_label))
 
+                pred_onehot = F.one_hot(out_label, num_classes=labels.shape[1])
+                self.valid_confusion.update(labels, pred_onehot)
+
         # add histogram of model parameters to the tensorboard
         for name, param in self.model.named_parameters():
             self.writer.add_histogram(name, param, bins="auto")
 
-        return self.valid_metrics.result()
+        return {**self.valid_metrics.result(), **self.valid_confusion.result()}
 
     def _progress(self, epoch_idx: int, batch_idx: int, loss_value: float) -> str:
         """Return a string for logging the training progress."""

@@ -1,3 +1,4 @@
+import csv
 import importlib
 import logging
 import logging.config
@@ -6,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
+import torch
 
 LOG_LEVELS = {
     0: logging.DEBUG,
@@ -233,3 +235,107 @@ def get_logger(name: str, verbosity: int = 2) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(LOG_LEVELS[verbosity])
     return logger
+
+class CSVLogger:
+    """Logs per-epoch training metrics to a CSV file, one row per epoch.
+
+    Column headers are taken from the keys of the first row logged.
+    """
+
+    def __init__(self, log_path: str | Path, reset: bool = True):
+        """
+        Args:
+            log_path (str | Path): Path to the CSV file to write.
+            reset (bool, optional): If True, start a fresh file (overwriting
+                any existing one). If False, append to an existing file,
+                reusing its header -- used when resuming training so metrics
+                from earlier epochs aren't lost. If no file exists yet,
+                behaves the same as reset=True regardless. Defaults to True.
+        """
+        self.log_path = Path(log_path)
+        self._fieldnames: list[str] | None = None
+
+        if not reset and self.log_path.exists():
+            with self.log_path.open("r", newline="", encoding="utf8") as f:
+                header = next(csv.reader(f), None)
+            if header:
+                self._fieldnames = header
+        else:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            if self.log_path.exists():
+                self.log_path.unlink()
+
+    def log(self, row: dict) -> None:
+        """Append one row of metrics to the CSV file.
+
+        Args:
+            row (dict): Mapping of column name to value for this row. On the
+                first call this establishes the header.
+
+        Raises:
+            ValueError: If `row`'s keys don't match the established header.
+        """
+        write_header = False
+
+        if self._fieldnames is None:
+            self._fieldnames = list(row.keys())
+            write_header = True
+        elif set(row.keys()) != set(self._fieldnames):
+            raise ValueError(
+                f"CSV row keys {sorted(row.keys())} do not match this "
+                f"log's established header {sorted(self._fieldnames)}. All "
+                f"logged epochs must report the same set of metrics."
+            )
+
+        with self.log_path.open("a", newline="", encoding="utf8") as f:
+            writer = csv.DictWriter(f, fieldnames=self._fieldnames)
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+
+
+class ConfusionTracker:
+    """Accumulates per-class TP/FP/FN/TN counts across an epoch.
+
+    Expects one-hot true labels and one-hot predicted labels per batch
+    (shape (batch, num_classes) each). Counts are kept separately for each
+    class (not pooled/micro-averaged). All ops are vectorized tensor ops with one sync
+    per batch, so overhead is negligible next to the forward/backward pass.
+
+    Attributes:
+        num_classes (int): Number of classes being tracked.
+        tp, fp, fn, tn (torch.Tensor): Running per-class counts, shape
+            (num_classes,).
+    """
+
+    def __init__(self, num_classes: int):
+        self.num_classes = num_classes
+        self.reset()
+
+    def reset(self):
+        self.tp = torch.zeros(self.num_classes, dtype=torch.long)
+        self.fp = torch.zeros(self.num_classes, dtype=torch.long)
+        self.fn = torch.zeros(self.num_classes, dtype=torch.long)
+        self.tn = torch.zeros(self.num_classes, dtype=torch.long)
+
+    def update(self, y_true_onehot: torch.Tensor, y_pred_onehot: torch.Tensor):
+        y_true = y_true_onehot.long().cpu()
+        y_pred = y_pred_onehot.long().cpu()
+
+        self.tp += (y_true * y_pred).sum(dim=0)
+        self.fp += ((1 - y_true) * y_pred).sum(dim=0)
+        self.fn += (y_true * (1 - y_pred)).sum(dim=0)
+        self.tn += ((1 - y_true) * (1 - y_pred)).sum(dim=0)
+
+    def result(self) -> dict:
+        """Returns a flat dict with one key per class per count, e.g.
+        {"tp_0": 412, "fp_0": 38, ..., "tp_9": 390, ...} -- flat so it
+        drops straight into CSVLogger/epoch_log without any special-casing.
+        """
+        out = {}
+        for c in range(self.num_classes):
+            out[f"tp_{c}"] = self.tp[c].item()
+            out[f"fp_{c}"] = self.fp[c].item()
+            out[f"fn_{c}"] = self.fn[c].item()
+            out[f"tn_{c}"] = self.tn[c].item()
+        return out

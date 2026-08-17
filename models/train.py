@@ -10,6 +10,7 @@ import utils.data_loader as module_data
 from utils.config import Config
 from utils.trainer import MnistTrainer
 from utils.logger import get_logger
+from utils.tools import find_latest_checkpoint
 
 
 def main(cfg: Config) -> None:
@@ -64,6 +65,12 @@ def main(cfg: Config) -> None:
         train_data_loader=train_data_loader,
         valid_data_loader=valid_data_loader,
     )
+
+    ckpt_path = find_latest_checkpoint(cfg.save_dir)
+    if ckpt_path is not None:
+        trainer._resume_checkpoint(ckpt_path)
+    else:
+        logger.info("No existing checkpoints found for this run_id; starting fresh.")
 
     # reseed so augmentations are the same independent of the model
     torch.manual_seed(seed)
