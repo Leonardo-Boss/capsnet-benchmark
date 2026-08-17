@@ -20,6 +20,8 @@ class BaseDataLoader(DataLoader):
         n_samples (int): Total number of samples in the dataset.
         validation_split (int | float): Fraction or amount of the data to be
             used as validation data.
+        data_fraction (float): Fraction of the *training* split to actually
+            use, after the validation split is taken out. 1.0 uses all of it.
         train_sampler (Sampler): Sampler for the training data.
         valid_sampler (Sampler): Sampler for the validation data.
         init_kwargs (dict): Keyword arguments for the PyTorch DataLoader
@@ -34,6 +36,7 @@ class BaseDataLoader(DataLoader):
         validation_split: int | float,
         num_workers: int,
         collate_fn: Callable = default_collate,
+        data_fraction: float = 1.0,
     ):
         """Initialize loader class with the given dataset and parameters.
 
@@ -46,7 +49,18 @@ class BaseDataLoader(DataLoader):
             num_workers (int): Number of subprocesses to use for data loading.
             collate_fn (Callable, optional): Merges a list of samples to form a
                 mini-batch. Defaults to PyTorch default_collate.
+            data_fraction (float, optional): Fraction (0, 1] of the training
+                split to actually train on -- e.g. 0.1 uses 10% of the
+                training data. Applied *after* validation_split, so the
+                validation set is unaffected and stays identical across runs
+                with different data_fraction values, keeping comparisons
+                fair. The subset is chosen randomly, not just the first N
+                samples. Defaults to 1.0
+                (use all training data).
         """
+        assert 0 < data_fraction <= 1, "data_fraction must be in (0, 1]"
+        self.data_fraction = data_fraction
+
         self.shuffle = shuffle
         self.n_samples = len(dataset)
         self.validation_split = validation_split
@@ -74,16 +88,16 @@ class BaseDataLoader(DataLoader):
 
         Returns:
             train_sampler (SubsetRandomSampler): Sampler for the training set.
-            valid_sampler (SubsetRandomSampler): Sampler for the validation set.
+            valid_sampler (SubsetRandomSampler | None): Sampler for the
+                validation set, or None if no validation split and no
+                data_fraction subsetting is configured.
         """
-        # no split performed
-        if split == 0.0:
-            return None, None
-
         idx_full = np.arange(self.n_samples)
         np.random.shuffle(idx_full)
 
-        if isinstance(split, int):
+        if split == 0.0:
+            len_valid = 0
+        elif isinstance(split, int):
             assert split > 0, "Validation set size should be at least 1."
             assert (
                 split < self.n_samples
@@ -95,10 +109,24 @@ class BaseDataLoader(DataLoader):
         valid_idx = idx_full[0:len_valid]
         train_idx = np.delete(idx_full, np.arange(0, len_valid))
 
-        train_sampler = SubsetRandomSampler(train_idx)
-        valid_sampler = SubsetRandomSampler(valid_idx)
+        # subsample the training portion only -- validation stays full and
+        # identical across different data_fraction runs
+        if self.data_fraction < 1.0:
+            n_keep = max(1, int(len(train_idx) * self.data_fraction))
+            train_idx = np.random.choice(train_idx, size=n_keep, replace=False)
 
-        # turn off shuffle option which is mutually exclusive with sampler
+        # a sampler is now needed whenever we're subsetting the training
+        # data -- either from validation_split or data_fraction -- so
+        # shuffle is turned off and DataLoader's own default-sampler path
+        # is bypassed in both cases (previously this only happened for
+        # validation_split != 0)
+        needs_subset = len_valid > 0 or self.data_fraction < 1.0
+        if not needs_subset:
+            return None, None
+
+        train_sampler = SubsetRandomSampler(train_idx)
+        valid_sampler = SubsetRandomSampler(valid_idx) if len_valid > 0 else None
+
         self.shuffle = False
         self.n_samples = len(train_idx)
 
@@ -110,7 +138,6 @@ class BaseDataLoader(DataLoader):
             return None
         else:
             return DataLoader(sampler=self.valid_sampler, **self.init_kwargs)
-
 
 class MnistDataLoader(BaseDataLoader):
     """MNIST data loading class for Efficient CapsNet training.
@@ -320,6 +347,8 @@ class Cifar10DataLoader(BaseDataLoader):
         num_workers: int = 1,
         training: bool = True,
         augmentation: str = "standard",
+        data_fraction: float = 1.0,
+
     ):
         """Initializes the Cifar10DataLoader with the given parameters.
 
@@ -346,6 +375,10 @@ class Cifar10DataLoader(BaseDataLoader):
                 RandAugment + Random Erasing). Ignored when training=False --
                 the eval/test split is always just normalized. Defaults to
                 "standard".
+            data_fraction (float, optional): Fraction (0, 1] of the training
+                data to actually use -- e.g. 0.25 trains on 25% of the
+                training split. Ignored when training=False (the test/eval
+                split is always used in full). Defaults to 1.0.
         """
         self.num_classes = 10
 
@@ -377,7 +410,8 @@ class Cifar10DataLoader(BaseDataLoader):
         )
 
         super().__init__(
-            self.dataset, batch_size, shuffle, validation_split, num_workers
+            self.dataset, batch_size, shuffle, validation_split, num_workers,
+            data_fraction=data_fraction if training else 1.0,
         )
 
     def _build_train_transform(self, augmentation: str) -> transforms.Compose:
