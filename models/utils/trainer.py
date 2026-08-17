@@ -287,7 +287,6 @@ class MnistTrainer(BaseTrainer):
         self.valid_confusion = ConfusionTracker(num_classes)
         self.n_batch = len(self.train_loader)
         self.aug_check: bool = self.config["trainer"].get("aug_check", False)
-        self.aug_check_batches: int = self.config["trainer"].get("aug_check_batches", 2)
 
     def _train_epoch(self, epoch: int) -> dict:
         """Train the model for one epoch.
@@ -309,17 +308,13 @@ class MnistTrainer(BaseTrainer):
             labels = labels.to(self.device)
 
             # check if augmentations are deterministic
-            if self.aug_check and epoch == self.start_epoch and batch_idx < self.aug_check_batches:
+            if self.aug_check:
                 check_hash = hashlib.sha256(
                     images.detach().cpu().numpy().tobytes()
                 ).hexdigest()[:12]
                 self.logger.info(
                     "Augmentation check -- epoch %d batch %d hash: %s",
                     epoch, batch_idx, check_hash,
-                )
-                save_image(
-                    make_grid(images[:16].cpu(), nrow=4, normalize=True),
-                    self.config.log_dir / f"aug_check_ep{epoch}_batch{batch_idx}.png",
                 )
 
             self.optimizer.zero_grad()  # zero the gradients

@@ -44,7 +44,7 @@ trainer:
   save_period: 10  # save model every x epoch
   verbosity: 0  # see main.verbosity
   monitor: 'min val_loss'  # '{min|max} {metrics}'
-  early_stop: 5  # stop after x epoch not improving
+  early_stop: 5  # stop after x epoch not improving negative for no early stop
   tensorboard: True
 
 logger:  # global logger config
