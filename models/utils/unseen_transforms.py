@@ -25,6 +25,15 @@ def brightness_shift(img: torch.Tensor, factor: float = 1.6) -> torch.Tensor:
 def contrast_shift(img: torch.Tensor, factor: float = 0.4) -> torch.Tensor:
     return TF.adjust_contrast(img, contrast_factor=factor)
 
+def large_rotation(img: torch.Tensor, degrees: float = 90.0) -> torch.Tensor:
+    """Rotates by a random angle in [-degrees, degrees].
+
+    Deliberately outside the +/-15deg range used by the 'standard'/'strong'
+    training augmentation regimes, so this tests genuinely unseen rotation
+    magnitudes rather than overlapping with what the model trained under.
+    """
+    angle = (torch.rand(1).item() * 2 - 1) * degrees
+    return TF.rotate(img, angle)
 
 def occlusion(img: torch.Tensor, patch_frac: float = 0.25) -> torch.Tensor:
     """Blacks out a random square patch covering ~patch_frac of the image."""
@@ -43,4 +52,5 @@ UNSEEN_TRANSFORMS = {
     "brightness_shift": brightness_shift,
     "contrast_shift": contrast_shift,
     "occlusion": occlusion,
+    "large_rotation": large_rotation,
 }

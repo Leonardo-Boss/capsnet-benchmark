@@ -64,7 +64,7 @@ def build_eval_transform(augmentation: str, unseen_names: list[str] | None) -> t
 def load_model(cfg: Config, checkpoint_path: str, device: torch.device) -> torch.nn.Module:
     """Builds the architecture from `cfg` and loads trained weights into it."""
     model = cfg.init_obj("arch", module_arch)
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["state_dict"])
     model = model.to(device)
     model.eval()
@@ -182,7 +182,7 @@ def main():
 
     transform = build_eval_transform(args.augmentation, unseen_names)
     data_dir = args.data_dir or cfg["data_loader"]["args"]["data_dir"]
-    dataset = datasets.CIFAR10(data_dir, train=False, download=True, transform=transform)
+    dataset = datasets.CIFAR10(data_dir, train=False, download=False, transform=transform)
     loader = DataLoader(
         dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers
     )
@@ -191,7 +191,7 @@ def main():
     acc = sum(r["correct"] for r in rows) / len(rows)
     logger.info("Accuracy      : %.4f", acc)
 
-    model_name = Path(args.model).stem
+    model_name = Path(args.model).parent.name
     out_name = build_output_name(model_name, args.augmentation, unseen_names if unseen_enabled else None)
     out_path = Path(args.output_dir) / out_name
 

@@ -221,7 +221,7 @@ class BaseTrainer:
         self.logger.info("Loading checkpoint: %s ...", resume_path)
 
         device = next(self.model.parameters()).device
-        checkpoint = torch.load(resume_path, map_location=device)
+        checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
 
         if checkpoint["arch"] != type(self.model).__name__:
             self.logger.warning(
