@@ -1,0 +1,2 @@
+deit_tiny_cifar_10_none_0.33_1,deit_tiny_cifar_10_none_1_1,deit_tiny_cifar_10_strong_0.33_1,deit_tiny_cifar_10_strong_1_1,ecaps_cifar_10_none_0.33_1,ecaps_cifar_10_none_1_1,ecaps_cifar_10_strong_0.33_1,ecaps_cifar_10_strong_1_1,resnet18_cifar_10_none_0.33_1,resnet18_cifar_10_none_1_1,resnet18_cifar_10_strong_0.33_1,resnet18_cifar_10_strong_1_1
+23,30,95,100,6,9,99,100,5,4,85,94

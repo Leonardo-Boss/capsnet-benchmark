@@ -1,147 +1,110 @@
 % Comparação dos Modelos
+% !TeX program = lualatex
 
 \chapter{Comparação dos Modelos}
+Esta é uma comparação preliminar apenas de um treinamento com aumentação de dados padrão 100\% dos dados no dataset cifar-10. A comparação real mostrara a diferença entre diferentes opções de aumentação de dados, quantidade de dados e transformações não vistas durante treinamento.
 
-Os três modelos avaliados apresentam diferenças consideráveis tanto em desempenho
-quanto em custo computacional. A Tabela~\ref{tab:model-comparison} apresenta as principais
-medidas obtidas durante os experimentos.
+\subsection{Desempenho de validação}
+A Tabela~\ref{tab:resumo} apresenta o melhor resultado de validação observado em cada execução. Para a seleção do melhor modelo, foi utilizada a maior acurácia de validação registrada durante o treinamento.
 
-\input{summary\_table.tex}
-
-A comparação das métricas de validação deve ser feita com cautela. O FFDSM e o
-TFNet reportam \textit{val\_map50}, enquanto o ResCapsTCAttnFire reporta
-\textit{val\_f1}. Portanto, os valores dessas métricas não constituem uma
-comparação direta de desempenho preditivo. Dentro das métricas de mesmo tipo, o
-FFDSM atingiu um melhor valor de \textit{mAP50} de 0.0917, enquanto o
-TFNet atingiu 0.0493. O ResCapsTCAttnFire atingiu F1 de 0.7931, mas esse
-resultado deve ser interpretado separadamente devido à diferença de métrica.
-
-\section{Eficiência computacional}
-
-A Figura~\ref{fig:efficiency} apresenta a comparação entre os modelos em termos
-de GMACs, memória de pico, tempo médio por época e número de parâmetros.
-
-\begin{figure}[htbp]
+\begin{table}[H]
 \centering
-\includegraphics[width=\textwidth]{efficiency.png}
-\caption{Comparação da eficiência computacional dos modelos.}
-\label{fig:efficiency}
+\caption{Resumo dos melhores resultados observados nos registros de treinamento.}
+\label{tab:resumo}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+Modelo & Melhor época & Acurácia de validação & Perda de validação & Épocas executadas \\
+\midrule
+ResNet-18 & 24 & 90.93\% & 0.3076 & 28 \\
+Efficient-CapsNet & 59 & 83.39\% & 0.1215 & 67 \\
+DeiT-Tiny & 45 & 73.12\% & 0.8315 & 50 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+O \textit{ResNet-18} apresentou o melhor desempenho entre os três modelos, atingindo aproximadamente 90.93\% de acurácia de validação na época 24. O \textit{Efficient-CapsNet} atingiu 83.39\% na época 59, enquanto o \textit{DeiT-Tiny} alcançou 73.12\% na época 45. Dessa forma, neste experimento, a diferença entre o ResNet-18 e o Efficient-CapsNet foi de aproximadamente 7.55 pontos percentuais, enquanto a diferença entre o ResNet-18 e o DeiT-Tiny foi de aproximadamente 17.81 pontos percentuais.
+
+\subsection{Evolução da acurácia}
+
+A Figura~\ref{fig:valacc} apresenta a evolução da acurácia de validação ao longo das épocas. O ResNet-18 apresenta crescimento rápido nas primeiras épocas e ultrapassa 90\% de acurácia de validação durante a execução. O Efficient-CapsNet apresenta uma progressão mais gradual, alcançando valores superiores a 80\% apenas em uma etapa mais avançada do treinamento. Já o DeiT-Tiny apresenta uma evolução consideravelmente mais lenta e termina a execução abaixo dos demais modelos.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.95\textwidth,
+    height=8cm,
+    xlabel={Época},
+    ylabel={Acurácia de validação (\%)},
+    xmin=1,
+    xmax=67,
+    ymin=20,
+    ymax=100,
+    grid=major,
+    legend pos=south east,
+    thick
+]
+\addplot[] coordinates {(1,59.9441) (2,68.1909) (3,74.1414) (4,76.6374) (5,81.1102) (6,81.6094) (7,82.7676) (8,83.3067) (9,86.0623) (10,86.9609) (11,86.6813) (12,87.0008) (13,88.3187) (14,88.8379) (15,89.0375) (16,88.7979) (17,89.1174) (18,89.3970) (19,89.7564) (20,90.2157) (21,90.6150) (22,90.0958) (23,90.5950) (24,90.9345) (25,90.5950) (26,90.4752) (27,90.7748) (28,90.8347)};
+\addlegendentry{ResNet-18}
+\addplot[dashed] coordinates {(1,52.3762) (2,59.2851) (3,62.4401) (4,64.3770) (5,67.0128) (6,69.2891) (7,68.7500) (8,72.0048) (9,73.0032) (10,72.9633) (11,74.2412) (12,74.3011) (13,75.1997) (14,75.5990) (15,76.3978) (16,74.6206) (17,77.6358) (18,76.8770) (19,77.9353) (20,78.3546) (21,78.1550) (22,78.7540) (23,79.8522) (24,79.3730) (25,78.8538) (26,78.6542) (27,79.4928) (28,79.7324) (29,79.4129) (30,79.4129) (31,80.2716) (32,78.9736) (33,80.9305) (34,81.2500) (35,81.5895) (36,80.5312) (37,80.1518) (38,80.0120) (39,81.2300) (40,81.7292) (41,81.0503) (42,81.3498) (43,81.8890) (44,81.8091) (45,82.2684) (46,81.3698) (47,81.6693) (48,82.0687) (49,81.9089) (50,82.0288) (51,82.3482) (52,82.3682) (53,83.0671) (54,82.9673) (55,82.1486) (56,82.9073) (57,82.9273) (58,82.8874) (59,83.3866) (60,83.2867) (61,83.2867) (62,82.9673) (63,83.2268) (64,82.9872) (65,83.1070) (66,82.8874) (67,82.6877)};
+\addlegendentry{Efficient-CapsNet}
+\addplot[dotted] coordinates {(1,27.1765) (2,36.0623) (3,36.2021) (4,40.2556) (5,44.1693) (6,43.6901) (7,45.1078) (8,47.7636) (9,49.3411) (10,51.3379) (11,50.8586) (12,51.3578) (13,55.3914) (14,55.2316) (15,55.7708) (16,57.7676) (17,59.2652) (18,60.4034) (19,60.7628) (20,61.2819) (21,63.1190) (22,63.6781) (23,64.6965) (24,66.2540) (25,66.9329) (26,65.9145) (27,66.4137) (28,66.0543) (29,68.0312) (30,69.4089) (31,67.8914) (32,70.6270) (33,69.6286) (34,70.9065) (35,70.6869) (36,70.5072) (37,70.2077) (38,71.2260) (39,71.6653) (40,70.7867) (41,72.4641) (42,72.3043) (43,72.9233) (44,73.0831) (45,73.1230) (46,71.9449) (47,71.8051) (48,72.5240) (49,71.9848) (50,73.0032)};
+\addlegendentry{DeiT-Tiny}
+\end{axis}
+\end{tikzpicture}
+\caption{Acurácia de validação ao longo do treinamento.}
+\label{fig:valacc}
 \end{figure}
 
-O ResCapsTCAttnFire apresenta a menor quantidade de operações, com 4.633 GMACs,
-e também o menor número de parâmetros, com 2.22 milhões. O FFDSM possui 9.271
-GMACs e 9.24 milhões de parâmetros, enquanto o TFNet possui 31.656 GMACs
-e 30.45 milhões de parâmetros. Assim, em termos de tamanho da arquitetura e
-quantidade de operações, o ResCapsTCAttnFire apresenta a menor complexidade entre
-os três modelos.
+\subsection{Evolução da perda}
 
-O consumo de memória apresenta um comportamento diferente. O TFNet
-apresenta o menor pico de memória, com 3236.4 MB, seguido pelo
-ResCapsTCAttnFire, com 3522.4 MB, e pelo FFDSM, com 4831.9 MB. Dessa forma, a
-menor quantidade de parâmetros e GMACs do ResCapsTCAttnFire não se traduz
-diretamente em menor utilização de memória durante o treinamento.
+A evolução da perda de validação é apresentada na Figura~\ref{fig:valloss}. É importante observar que as funções de perda não são necessariamente diretamente comparáveis em termos absolutos entre arquiteturas, especialmente porque o Efficient-CapsNet usa \textit{TotalLoss}, enquanto ResNet-18 e DeiT-Tiny utilizam uma \textit{ClassificationLoss}. Assim, a perda é mais adequada para analisar a dinâmica de treinamento de cada modelo do que para estabelecer uma ordenação absoluta entre arquiteturas.
 
-Em relação ao tempo médio por época, o FFDSM apresenta o menor valor, com
-280.3 s por época. O TFNet apresenta 793.0 s, enquanto o
-ResCapsTCAttnFire apresenta 1892.6 s por época. Isso mostra que a quantidade de
-GMACs e de parâmetros, isoladamente, não é suficiente para explicar o tempo real
-de execução observado durante o treinamento.
-
-\section{Tempo de treinamento}
-
-O tempo total de treinamento também deve ser considerado juntamente com o número
-de épocas executadas. O FFDSM foi treinado por 129 épocas e apresentou um tempo
-total de 10.04 horas. O TFNet foi treinado por 200 épocas e levou
-44.05 horas. O ResCapsTCAttnFire, por sua vez, foi treinado por apenas 20 épocas
-e apresentou um tempo total de 10.51 horas.
-
-Apesar de o ResCapsTCAttnFire possuir o maior tempo médio por época, seu
-treinamento completo apresentou duração semelhante à do FFDSM devido ao número
-consideravelmente menor de épocas. O TFNet apresentou o maior tempo total
-de treinamento, associado tanto ao elevado tempo por época quanto ao maior número
-de épocas executadas.
-
-\section{Métrica de validação}
-
-A evolução da métrica de validação reportada para cada modelo é apresentada na
-Figura~\ref{fig:metrics}.
-
-\begin{figure}[htbp]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\textwidth]{metric\_curves.png}
-\caption{Evolução da métrica de validação reportada por cada modelo.}
-\label{fig:metrics}
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.95\textwidth,
+    height=8cm,
+    xlabel={Época},
+    ylabel={Perda de validação},
+    xmin=1,
+    xmax=67,
+    ymin=0,
+    grid=major,
+    legend pos=north east,
+    thick
+]
+\addplot[] coordinates {(1,1.1379) (2,0.8862) (3,0.7374) (4,0.6584) (5,0.5451) (6,0.5299) (7,0.4883) (8,0.4742) (9,0.4015) (10,0.3760) (11,0.3797) (12,0.3826) (13,0.3452) (14,0.3258) (15,0.3400) (16,0.3304) (17,0.3238) (18,0.3401) (19,0.3128) (20,0.3089) (21,0.3068) (22,0.2958) (23,0.3111) (24,0.3076) (25,0.3184) (26,0.3211) (27,0.3100) (28,0.3082)};
+\addlegendentry{ResNet-18}
+\addplot[dashed] coordinates {(1,0.3241) (2,0.2823) (3,0.2582) (4,0.2475) (5,0.2302) (6,0.2197) (7,0.2215) (8,0.2004) (9,0.1948) (10,0.1944) (11,0.1868) (12,0.1827) (13,0.1788) (14,0.1786) (15,0.1719) (16,0.1804) (17,0.1641) (18,0.1634) (19,0.1593) (20,0.1558) (21,0.1569) (22,0.1531) (23,0.1466) (24,0.1472) (25,0.1496) (26,0.1487) (27,0.1461) (28,0.1439) (29,0.1465) (30,0.1475) (31,0.1428) (32,0.1495) (33,0.1390) (34,0.1353) (35,0.1344) (36,0.1361) (37,0.1408) (38,0.1410) (39,0.1352) (40,0.1336) (41,0.1363) (42,0.1316) (43,0.1332) (44,0.1319) (45,0.1274) (46,0.1341) (47,0.1286) (48,0.1267) (49,0.1301) (50,0.1283) (51,0.1278) (52,0.1260) (53,0.1245) (54,0.1256) (55,0.1278) (56,0.1252) (57,0.1251) (58,0.1245) (59,0.1215) (60,0.1228) (61,0.1212) (62,0.1256) (63,0.1251) (64,0.1231) (65,0.1222) (66,0.1233) (67,0.1237)};
+\addlegendentry{Efficient-CapsNet}
+\addplot[dotted] coordinates {(1,1.8998) (2,1.6840) (3,1.7011) (4,1.5978) (5,1.5225) (6,1.5290) (7,1.4896) (8,1.4271) (9,1.3879) (10,1.3121) (11,1.3580) (12,1.3239) (13,1.2226) (14,1.2287) (15,1.2211) (16,1.1514) (17,1.1426) (18,1.1069) (19,1.0936) (20,1.0936) (21,1.0496) (22,1.0191) (23,0.9744) (24,0.9605) (25,0.9297) (26,0.9480) (27,0.9335) (28,0.9517) (29,0.8977) (30,0.8703) (31,0.9227) (32,0.8549) (33,0.8589) (34,0.8393) (35,0.8407) (36,0.8570) (37,0.8626) (38,0.8296) (39,0.8253) (40,0.8625) (41,0.8363) (42,0.8494) (43,0.8223) (44,0.8118) (45,0.8315) (46,0.8643) (47,0.8536) (48,0.8629) (49,0.8754) (50,0.8799)};
+\addlegendentry{DeiT-Tiny}
+\end{axis}
+\end{tikzpicture}
+\caption{Perda de validação ao longo do treinamento.}
+\label{fig:valloss}
 \end{figure}
 
-O FFDSM apresenta uma evolução bastante instável de \textit{val\_map50}, com
-oscilações consideráveis ao longo do treinamento. Apesar disso, observa-se uma
-tendência geral de crescimento, atingindo o melhor valor de 0.0917 na época 125.
+\subsection{Considerações sobre eficiência}
 
-O TFNet apresenta oscilações ainda mais pronunciadas. Seu melhor valor de
-\textit{val\_map50} foi 0.0493 na época 40. Após esse ponto, a métrica não
-apresenta uma melhora consistente até o final do treinamento.
-
-O ResCapsTCAttnFire apresenta comportamento diferente dos outros dois modelos,
-uma vez que sua métrica reportada é F1. A curva apresenta uma tendência geral de
-crescimento, partindo de aproximadamente 0.66 e chegando a 0.7931 na época 19.
-Embora existam algumas quedas intermediárias, a evolução geral da métrica é
-positiva ao longo das 20 épocas.
-
-\section{Evolução da perda de treinamento}
-
-A evolução da perda durante o treinamento é apresentada na
-Figura~\ref{fig:loss}.
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\textwidth]{loss\_curves.png}
-\caption{Evolução da perda de treinamento dos modelos.}
-\label{fig:loss}
-\end{figure}
-
-Os três modelos apresentam redução da perda durante o treinamento. O FFDSM
-apresenta uma queda acentuada nas primeiras épocas, seguida por uma redução mais
-gradual, atingindo uma perda final de aproximadamente 0.2231.
-
-O ResCapsTCAttnFire também apresenta uma redução rápida da perda, chegando a
-aproximadamente 0.2901 ao final das 20 épocas. Já o TFNet apresenta uma
-redução mais lenta e permanece em aproximadamente 0.5731 ao final das 200 épocas.
-
-Entretanto, os valores absolutos da perda não devem ser utilizados isoladamente
-para determinar qual arquitetura apresenta melhor desempenho, especialmente caso
-as funções de perda ou os procedimentos de treinamento utilizados pelos modelos
-não sejam idênticos.
+Aproximadamente, cada época do ResNet-18 levou cerca de 68.3 segundos, enquanto o Efficient-CapsNet levou cerca de 21.2 segundos e o DeiT-Tiny cerca de 53.8 segundos. Portanto, embora o Efficient-CapsNet tenha exigido mais épocas para atingir seu melhor resultado, cada época foi consideravelmente mais rápida neste experimento.
 
 \section{Discussão}
 
-Os resultados mostram diferentes compromissos entre complexidade computacional,
-tempo de treinamento e desempenho de validação.
+Considerando exclusivamente os resultados registrados, o ResNet-18 apresentou o melhor compromisso entre velocidade de convergência e desempenho de validação. O modelo alcançou aproximadamente 90,93\% de acurácia de validação e precisou de apenas 28 épocas para atingir seu melhor valor observado. Além disso, seu treinamento por época foi mais lento que o Efficient-CapsNet, mas a quantidade significativamente menor de épocas necessárias compensou essa diferença neste experimento.
 
-O ResCapsTCAttnFire apresenta a menor quantidade de parâmetros e GMACs entre os
-três modelos. Seu número de parâmetros é aproximadamente 2.22 milhões, contra
-9.24 milhões do FFDSM e 30.45 milhões do TFNet. Entretanto, essa
-vantagem não se traduz em menor tempo por época: o ResCapsTCAttnFire apresenta
-1892.6 s por época, aproximadamente 6.8 vezes o tempo observado para o FFDSM.
-Esse comportamento indica que a contagem de GMACs não captura necessariamente
-todos os fatores responsáveis pelo tempo efetivo de execução de uma arquitetura.
+O Efficient-CapsNet apresentou desempenho intermediário, atingindo aproximadamente 83,39\% de acurácia de validação. Apesar de seu resultado final inferior ao ResNet-18, sua curva de treinamento mostra uma evolução contínua durante uma quantidade maior de épocas. Isso é relevante para a análise das redes de cápsulas, pois demonstra que a arquitetura foi capaz de aprender no CIFAR-10, embora tenha apresentado uma convergência e um desempenho final inferiores aos do modelo convolucional avaliado.
 
-O FFDSM apresenta um compromisso diferente. Ele possui o menor tempo médio por
-época entre os três modelos e, entre os modelos que reportam \textit{mAP50},
-atingiu o maior valor observado, 0.0917. Seu principal custo computacional é o
-maior pico de memória, de 4831.9 MB.
+O DeiT-Tiny apresentou o menor desempenho entre os modelos avaliados, com aproximadamente 73,12\% de acurácia de validação. Além disso, sua curva evidencia uma convergência mais lenta.
 
-O TFNet apresenta 30.45 milhões de parâmetros e 31.656 GMACs, sendo o
-modelo com maior complexidade computacional segundo essas duas medidas. Também
-apresenta o maior tempo total de treinamento, 44.05 horas. Apesar de possuir o
-menor pico de memória dos três modelos, com 3236.4 MB, seu \textit{mAP50} máximo
-foi 0.0493.
+\section{Conclusão}
 
-É importante destacar que os resultados de F1 e mAP50 não devem ser comparados
-numericamente como se fossem a mesma métrica. Assim, os dados permitem uma
-comparação direta de eficiência computacional, mas a comparação de desempenho
-preditivo entre os três modelos é limitada pela utilização de métricas diferentes.
+No cenário experimental analisado, a ordem de desempenho em acurácia de validação foi
 
-Para uma comparação definitiva de desempenho, seria necessário avaliar os três
-modelos sob o mesmo conjunto de validação, utilizando a mesma métrica e,
-idealmente, o mesmo protocolo experimental.
-
+\[
+\text{ResNet-18} > \text{Efficient-CapsNet} > \text{DeiT-Tiny}.
+\]

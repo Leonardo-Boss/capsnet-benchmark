@@ -23,6 +23,18 @@
 \usepackage{subcaption}
 \usepackage{pdfpages}
 
+\usepackage{fontspec}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{pgfplots}
+\usepackage{float}
+\usepackage{siunitx}
+\usepackage{microtype}
+
+\pgfplotsset{compat=1.18}
+
 % Diretório onde se encontram as imagens utilizadas no trabalho.
 % O comando pode ser modificado para incluir diversos diretórios:
 %   \graphicspath{{dir1/}{dir2/}...}
@@ -33,7 +45,7 @@
 %
 
 % Qual é o título do trabalho?
-\titulo{Título do Trabalho}
+\titulo{CapsNet ainda vale a pena?}
 
 % Quais são as palavras-chave, em português e em inglês,
 % relacionadas ao trabalho?
@@ -64,8 +76,8 @@
 
 % Qual data foi ou será realizada a defesa?
 \diadefesa{XX}
-\mesdefesa{janeiro}
-\anodefesa{20XX}
+\mesdefesa{Septembro}
+\anodefesa{2026}
 
 % Qual é a área de concentração do trabalho?
 % De acordo com o Catálogo dos Cursos de Pós-Graduação
@@ -112,9 +124,9 @@
     \textual
     % \part{Primeira Parte}
     \incluir{capitulos/introducao.tex}
-    \incluir{capitulos/metodo.tex}
+    % \incluir{capitulos/metodo.tex}
     \incluir{capitulos/artigos.tex}
-    \incluir{capitulos/comparação.tex}
+    \incluir{capitulos/resultados.tex}
 
     % Elementos pós-textuais.
     \postextual

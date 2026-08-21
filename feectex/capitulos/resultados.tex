@@ -1,0 +1,118 @@
+% !TeX root = main.tex
+% Seção de Resultados
+% Requer no preâmbulo do documento principal: graphicx, float (para [H])
+% Opcional: subcaption, booktabs
+
+\chapter{Resultados}
+\label{resultados}
+
+Avaliamos três arquiteturas (Efficient-CapsNet, DeiT-Tiny e ResNet-18) treinadas no CIFAR-10 sob um grid $3 \times 2 \times 2$ de condições: presença de augmentação forte no treino (\emph{none} vs.\ \emph{strong}), fração de dados de treino ($0{,}33$ e $1{,}0$) e, em cada caso, avaliação sob três condições de teste: \emph{Clean} (sem deslocamento de distribuição), \emph{Unseen: Large Rotation} e \emph{Unseen: All Transforms} (composição de rotação, translação, escala e demais transformações não vistas no treino). Cada configuração foi treinada por até 100 épocas com early stopping baseado na acurácia de validação.
+
+\subsection{Acurácia em condição limpa e sob deslocamento de distribuição}
+
+A Figura~\ref{fig:grouped-bar} resume a acurácia de teste dos três modelos nas três condições de avaliação, para cada uma das quatro combinações de augmentação/fração de dados testadas. Em todas as configurações, a ordem relativa dos modelos em \emph{Clean} é preservada sob deslocamento: o ResNet-18 com augmentação forte e dados completos atinge a maior acurácia limpa ($0{,}93$), seguido pelo Efficient-CapsNet ($0{,}83$) e pelo DeiT-Tiny ($0{,}57$). A Figura~\ref{fig:heatmap} apresenta os mesmos valores em formato tabular (mapa de calor), o que evidencia que \textbf{nenhum modelo mantém acurácia aceitável sob \emph{All Transforms}}: mesmo os melhores modelos caem para a faixa de $0{,}11$--$0{,}20$, próximo do acaso ($0{,}10$ para 10 classes), independentemente de augmentação ou volume de dados.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{fig01_grouped_bar_accuracy_by_condition.png}
+    \caption{Acurácia de teste por modelo nas três condições de avaliação (\emph{Clean}, \emph{Unseen: Large Rotation}, \emph{Unseen: All Transforms}), para cada combinação de augmentação de treino e fração de dados.}
+    \label{fig:grouped-bar}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\linewidth]{fig03_accuracy_heatmap.png}
+    \caption{Mapa de calor da acurácia de teste para todas as combinações de modelo, configuração de treino e condição de teste.}
+    \label{fig:heatmap}
+\end{figure}
+
+\subsection{A vantagem do Efficient-CapsNet é condicional}
+
+Para isolar o efeito específico da arquitetura capsular, calculamos a diferença de acurácia entre o Efficient-CapsNet e o melhor baseline (ResNet-18 ou DeiT-Tiny) em cada uma das 20 combinações de configuração $\times$ condição de teste (Figura~\ref{fig:diverging}). O CapsNet supera os baselines em apenas \textbf{um} dos 20 cenários: rotação grande, sem augmentação de treino, com apenas $33\%$ dos dados ($+2{,}8$ pontos percentuais). Em todos os demais cenários o CapsNet fica atrás, com desvantagem que cresce à medida que se adiciona augmentação forte no treino e mais dados — chegando a $-10{,}7$ pp sob rotação grande com augmentação forte e dados completos. Isso sugere que a vantagem historicamente atribuída às cápsulas em regime de poucos dados e sem augmentação é real, porém pequena e estreita, e é rapidamente anulada — e até revertida — quando augmentação de dados moderna está disponível.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{fig07_ecaps_advantage_diverging_bar.png}
+    \caption{Vantagem de acurácia (pp) do Efficient-CapsNet sobre o melhor baseline (ResNet-18 ou DeiT-Tiny) em cada combinação de augmentação de treino, fração de dados, augmentação de teste e condição de avaliação. Barras verdes indicam vantagem do CapsNet; barras vermelhas, desvantagem.}
+    \label{fig:diverging}
+\end{figure}
+
+\subsection{Eficiência de dados}
+
+A Figura~\ref{fig:data-efficiency} mostra a acurácia em função da fração de dados de treino ($0{,}33$ vs.\ $1{,}0$) para cada modelo, condição de teste e regime de augmentação. Em nenhuma das três condições de teste o Efficient-CapsNet demonstra uma inclinação mais favorável (i.e., menor sensibilidade à redução de dados) do que o ResNet-18: ambos apresentam curvas aproximadamente paralelas, com o ResNet-18 partindo de um patamar igual ou superior. O DeiT-Tiny, por sua vez, é o modelo mais estável entre as duas frações de dados, embora em um patamar de acurácia absoluta mais baixo. Sob \emph{Unseen: All Transforms} (painel direito), as três curvas colapsam próximas do acaso, tornando a comparação de eficiência de dados pouco informativa nesse regime.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{fig06_data_efficiency_lines.png}
+    \caption{Acurácia de teste em função da fração de dados de treino, por modelo, regime de augmentação e condição de avaliação.}
+    \label{fig:data-efficiency}
+\end{figure}
+
+\subsection{Gap de equivariância}
+
+Definimos o \emph{gap de equivariância} como a queda de acurácia (em pp) entre a condição \emph{Clean} e cada condição de deslocamento. A Figura~\ref{fig:equiv-gap} mostra que, contrariamente à hipótese de que arquiteturas capsulares generalizam melhor para transformações não vistas, é o \textbf{DeiT-Tiny} que exibe consistentemente o menor gap de equivariância em ambas as condições de deslocamento e em todas as quatro configurações de treino — por exemplo, uma queda de apenas $\sim$11--18 pp sob rotação grande, contra $\sim$26--35 pp do Efficient-CapsNet e $\sim$30--42 pp do ResNet-18. Sob \emph{All Transforms}, o ResNet-18 é o modelo mais penalizado (queda de até $\sim$73 pp com augmentação forte e dados completos), enquanto o Efficient-CapsNet e o DeiT-Tiny sofrem menos em termos relativos, com o DeiT-Tiny novamente à frente. O perfil de robustez (Figura~\ref{fig:radar}) resume visualmente esse padrão: o triângulo do DeiT-Tiny é o que menos se deforma entre os três eixos (Clean, Rotação, All Transforms), especialmente nos regimes com augmentação forte.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{fig02_equivariance_gap_bars.png}
+    \caption{Queda de acurácia (pp) em relação à condição limpa, sob rotação grande (esquerda) e sob todas as transformações não vistas (direita), por modelo e configuração de treino.}
+    \label{fig:equiv-gap}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{fig05_radar_robustness_profile.png}
+    \caption{Perfil de robustez por modelo (acurácia normalizada nos três eixos de avaliação), para cada configuração de augmentação/fração de dados.}
+    \label{fig:radar}
+\end{figure}
+
+\subsection{Falha por classe sob deslocamento severo}
+
+A Figura~\ref{fig:per-class} detalha a acurácia por classe sob \emph{Unseen: All Transforms} para os modelos treinados sem augmentação e com dados completos. O colapso de desempenho não é uniforme: as classes 0 e 2 (e, para o DeiT-Tiny, a classe 3) retêm acurácia não trivial ($0{,}22$--$0{,}66$), enquanto as demais oito classes ficam abaixo de $0{,}10$ para todos os três modelos. Esse padrão é consistente entre arquiteturas, indicando que o deslocamento por \emph{All Transforms} degrada a discriminabilidade de forma dependente da classe (provavelmente relacionada à silhueta/textura de cada categoria) e não é mitigado pela arquitetura capsular.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\linewidth]{fig09_per_class_accuracy_heatmap.png}
+    \caption{Acurácia por classe sob \emph{Unseen: All Transforms}, modelos treinados sem augmentação e com $100\%$ dos dados.}
+    \label{fig:per-class}
+\end{figure}
+
+\subsection{Calibração e informatividade da confiança}
+
+Investigamos se a confiança das predições permanece informativa sob deslocamento, medindo o \emph{gap de confiança} (confiança média em acertos menos em erros). A Figura~\ref{fig:confidence-box} mostra as distribuições de confiança bruta (logit/score) para acertos e erros nas três condições de teste. O Efficient-CapsNet opera em uma escala de confiança muito mais estreita (aproximadamente $0$--$1$) que o ResNet-18 e o DeiT-Tiny (aproximadamente $0$--$12$), e suas distribuições de acerto e erro se sobrepõem quase completamente em todas as condições — indicando pouca capacidade de auto-avaliação. A Figura~\ref{fig:confidence-scatter} confirma esse padrão de forma agregada: o gap de confiança do CapsNet permanece próximo de zero mesmo na condição limpa (onde sua acurácia é competitiva), enquanto o ResNet-18 exibe o maior gap de confiança em todas as condições, sobretudo em \emph{Clean} e \emph{Large Rotation}. Sob \emph{All Transforms}, o gap de confiança de todos os modelos colapsa para próximo de zero, coerente com a acurácia próxima do acaso observada na Seção anterior.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{fig04_confidence_boxplots.png}
+    \caption{Distribuição da confiança bruta para predições corretas e incorretas, por modelo e condição de teste (fatia: sem augmentação de treino, dados completos, augmentação de teste normal).}
+    \label{fig:confidence-box}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\linewidth]{fig08_confidence_gap_vs_accuracy_scatter.png}
+    \caption{Gap de confiança (correto $-$ incorreto) em função da acurácia, para cada modelo e condição de teste.}
+    \label{fig:confidence-scatter}
+\end{figure}
+
+\subsection{Dinâmica de treinamento}
+
+Por fim, as Figuras~\ref{fig:train-acc} e~\ref{fig:train-loss} mostram a evolução de acurácia e \emph{loss} de treino/validação ao longo das 100 épocas, para os três modelos em quatro configurações representativas (sem/com augmentação forte, combinado com $33\%$/$100\%$ dos dados). O padrão de \emph{overfitting} é evidente e consistente entre modelos quando a augmentação de treino está desativada: a \emph{loss} de validação atinge seu mínimo cedo (época 4 a 30) e diverge fortemente em seguida, enquanto a \emph{loss} de treino segue caindo até próximo de zero — sintoma clássico de memorização, mais severo no Efficient-CapsNet e no ResNet-18 (melhor época em 4--9) do que no DeiT-Tiny (melhor época em 23--30). Com augmentação forte, esse comportamento desaparece: treino e validação seguem trajetórias próximas ao longo de todas as 100 épocas, e a melhor época é tipicamente próxima do fim do treinamento (94--100), sugerindo que os modelos ainda não haviam convergido totalmente no orçamento de épocas utilizado.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{training_evolution_accuracy.png}
+    \caption{Evolução da acurácia de treino e validação ao longo das épocas, por modelo e configuração (fração de dados $\times$ augmentação). \emph{best epoch} é a época com o menor validation loss, está é a época que foi usada nos testes.}
+    \label{fig:train-acc}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{training_evolution_loss.png}
+    \caption{Evolução da \emph{loss} de treino e validação ao longo das épocas, por modelo e configuração (fração de dados $\times$ augmentação). \emph{best epoch} é a época com o menor validation loss, está é a época que foi usada nos testes.}
+    \label{fig:train-loss}
+\end{figure}
+
+\subsection{Síntese}
+
+Em conjunto, os resultados indicam que: (i) a vantagem do Efficient-CapsNet sobre baselines convencionais em cenários de poucos dados e sem augmentação é real, porém marginal e restrita a um único cenário testado, sendo revertida assim que augmentação forte é introduzida; (ii) em termos de equivariância a transformações geométricas não vistas, é o DeiT-Tiny — não o CapsNet — que apresenta o menor gap de acurácia; (iii) sob deslocamento composto severo (\emph{All Transforms}), todos os modelos colapsam para desempenho próximo do acaso, e nenhuma arquitetura demonstra robustez estrutural superior; e (iv) a confiança do Efficient-CapsNet é pouco informativa sobre a correção das predições, mesmo em condição limpa, o que limita seu uso para detecção de erro ou abstenção sob incerteza.
