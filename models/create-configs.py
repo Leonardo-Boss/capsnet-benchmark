@@ -28,8 +28,8 @@ data_fractions = (
 )
 seeds = (
     1,
-    # 2,
-    # 3,
+    2,
+    3,
 )
 for model in models:
     update_recursive(model, config)
