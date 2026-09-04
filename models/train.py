@@ -76,7 +76,7 @@ def main(cfg: Config) -> None:
     if ckpt_path is not None:
         trainer._resume_checkpoint(ckpt_path)
     else:
-        logger.info("No existing checkpoints found for this run_id; starting fresh.")
+        logger.info(f"No existing checkpoints found for {ckpt_path}; starting fresh.")
 
     # reseed so augmentations are the same independent of the model
     torch.manual_seed(seed)

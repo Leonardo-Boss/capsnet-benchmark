@@ -7,14 +7,19 @@ def update_recursive(d, u):
         else:
             d[k] = v
 
-config = read_yaml('config.yaml')
-ecaps = read_yaml('config-ecaps.yaml')
-deit = read_yaml('config-deit-tiny.yaml')
-resnet = read_yaml('config-resnet-18.yaml')
+# config = read_yaml('config.yaml')
+# ecaps = read_yaml('config-ecaps.yaml')
+# deit = read_yaml('config-deit-tiny.yaml')
+# resnet = read_yaml('config-resnet-18.yaml')
+config = read_yaml('config-flame.yaml')
+ecaps = read_yaml('config-ecaps-flame.yaml')
+deit = read_yaml('config-deit-tiny-flame.yaml')
+resnet = read_yaml('config-resnet-18-flame.yaml')
 
 models = (ecaps, deit, resnet,)
 databases = (
-        {'name':'cifar_10', 'type':'Cifar10DataLoader'},
+        # {'name':'cifar_10', 'type':'Cifar10DataLoader'},
+        {'name':'flame', 'type':'FlameDataLoader'},
 )
 augmentations = (
     'none',

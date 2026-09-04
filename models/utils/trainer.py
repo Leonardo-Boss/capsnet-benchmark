@@ -329,6 +329,13 @@ class MnistTrainer(BaseTrainer):
             out_images, out_labels = self.model(images, labels, mode="train")
             loss = self.criterion(images, labels, out_images, out_labels)
             loss.backward()
+            if not torch.isfinite(loss):
+                self.logger.error("non-finite loss @ ep %d batch %d", epoch, batch_idx)
+                raise RuntimeError("loss diverged")
+            gnorm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
+            if not torch.isfinite(gnorm):
+                self.logger.error("non-finite grad norm @ ep %d batch %d", epoch, batch_idx)
+                raise RuntimeError("grad diverged")
             self.optimizer.step()
 
             # get the index of the maximum value

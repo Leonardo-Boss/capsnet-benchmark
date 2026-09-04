@@ -6,6 +6,28 @@ import torch.nn as nn
 from .layers import CapsLen, CapsMask, PrimaryCaps, RoutingCaps
 
 
+def _conv2d_out_size(size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
+    """Spatial output size of a single Conv2d application along one dimension."""
+    return (size + 2 * padding - kernel_size) // stride + 1
+
+
+def _capsnet_stem_out_size(size: int) -> int:
+    """Spatial size remaining after EfficientCapsNet's 4 conv layers, along one dim.
+
+    Mirrors conv1 (k5,s1,p0) -> conv2 (k3,s1,p0) -> conv3 (k3,s1,p0) ->
+    conv4 (k3,s2,p0). For the paper's 32x32 input this returns 11, which is
+    exactly the PrimaryCaps kernel size originally hardcoded below -- so
+    computing it dynamically here is a drop-in generalization that lets
+    EfficientCapsNet/FinalCapsNet accept any input resolution (e.g. 32x32
+    up to 254x254 for the Flame dataset) instead of only 32x32.
+    """
+    size = _conv2d_out_size(size, kernel_size=5)
+    size = _conv2d_out_size(size, kernel_size=3)
+    size = _conv2d_out_size(size, kernel_size=3)
+    size = _conv2d_out_size(size, kernel_size=3, stride=2)
+    return size
+
+
 class EfficientCapsNet(nn.Module):
     def __init__(self, input_size=(3, 32, 32), num_classes=10, capsule_dim=16):
         super(EfficientCapsNet, self).__init__()
@@ -20,8 +42,29 @@ class EfficientCapsNet(nn.Module):
         self.conv4 = nn.Conv2d(64, 128, 3, stride=2)
         self.bn4 = nn.BatchNorm2d(128)
 
+        # PrimaryCaps' depthwise conv must collapse the conv stem's output
+        # feature map down to exactly 1x1 (its forward() reshapes straight
+        # to (batch, num_capsules, dim_capsules) with no spatial dims left).
+        # So its kernel size has to equal the stem's output spatial size,
+        # which depends on input_size -- computed here instead of the
+        # original hardcoded 11 (valid only for 32x32 input).
+        h_out = _capsnet_stem_out_size(input_size[1])
+        w_out = _capsnet_stem_out_size(input_size[2])
+        if h_out <= 0 or w_out <= 0:
+            raise ValueError(
+                f"input_size {input_size} is too small for EfficientCapsNet's "
+                "conv stem (needs roughly >=16x16 after the 4 conv layers)."
+            )
+        primary_kernel_size = h_out if h_out == w_out else (h_out, w_out)
+        # Note: PrimaryCaps' depthwise conv kernel scales with input_size (e.g.
+        # ~11x11 for 32x32 input vs. ~122x122 for 254x254 input). It's still a
+        # valid conv (kernel == remaining feature map, output is 1x1), but the
+        # per-sample compute/memory of that single depthwise layer grows
+        # roughly with input_size^4, so training at native 254x254 is
+        # substantially slower/heavier than at smaller configured sizes.
+
         self.primary_caps = PrimaryCaps(
-            in_channels=128, kernel_size=11, capsule_size=(16, 8)
+            in_channels=128, kernel_size=primary_kernel_size, capsule_size=(16, 8)
         )
         self.routing_caps = RoutingCaps(in_capsules=(16, 8), out_capsules=(num_classes, capsule_dim))
         self.len_final_caps = CapsLen()

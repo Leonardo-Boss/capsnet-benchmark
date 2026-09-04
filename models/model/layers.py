@@ -10,7 +10,7 @@ class Squash(nn.Module):
 
     def forward(self, x):
         norm = torch.linalg.norm(x, ord=2, dim=-1, keepdim=True)
-        coef = 1 - 1 / (torch.exp(norm) + self.eps)
+        coef = -torch.expm1(-norm)
         unit = x / (norm + self.eps)
         return coef * unit
 
