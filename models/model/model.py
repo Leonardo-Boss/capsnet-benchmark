@@ -2,8 +2,16 @@ import numpy as np
 import timm
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .layers import CapsLen, CapsMask, PrimaryCaps, RoutingCaps
+
+
+# Resolution the original 4-conv stem was designed for. Inputs larger than
+# this get 2x pools inserted into the stem so the feature maps it works on
+# stay the size the architecture expects.
+_REFERENCE_INPUT_SIZE = 32
+_MAX_STEM_POOLS = 3  # one slot after each of conv1, conv2, conv3
 
 
 def _conv2d_out_size(size: int, kernel_size: int, stride: int = 1, padding: int = 0) -> int:
@@ -11,19 +19,44 @@ def _conv2d_out_size(size: int, kernel_size: int, stride: int = 1, padding: int 
     return (size + 2 * padding - kernel_size) // stride + 1
 
 
-def _capsnet_stem_out_size(size: int) -> int:
-    """Spatial size remaining after EfficientCapsNet's 4 conv layers, along one dim.
+def _num_stem_pools(size: int) -> int:
+    """Number of 2x pools to insert into the stem for a given input size.
+
+    Returns 0 at 32x32 (and anything smaller), so the CIFAR/MNIST-scale
+    configurations are bit-for-bit unchanged. Returns 3 at 224x224, which
+    brings the stem output back to 12x12 -- essentially the 11x11 the
+    architecture was built around.
+    """
+    n = 0
+    while n < _MAX_STEM_POOLS and size / (2 ** n) > _REFERENCE_INPUT_SIZE:
+        n += 1
+    return n
+
+
+def _capsnet_stem_out_size(size: int, n_pools: int = 0) -> int:
+    """Spatial size remaining after EfficientCapsNet's stem, along one dim.
 
     Mirrors conv1 (k5,s1,p0) -> conv2 (k3,s1,p0) -> conv3 (k3,s1,p0) ->
-    conv4 (k3,s2,p0). For the paper's 32x32 input this returns 11, which is
-    exactly the PrimaryCaps kernel size originally hardcoded below -- so
-    computing it dynamically here is a drop-in generalization that lets
-    EfficientCapsNet/FinalCapsNet accept any input resolution (e.g. 32x32
-    up to 254x254 for the Flame dataset) instead of only 32x32.
+    conv4 (k3,s2,p0), with a 2x max-pool inserted after conv1, conv2 and
+    conv3 for as many of those slots as `n_pools` calls for.
+
+    Without pooling the stem never downsamples beyond conv4's single
+    stride-2, so its cost grows with the square of the input side length:
+    3.56 GMACs at 224x224 against 0.044 at 32x32, an 80x jump, while
+    ResNet-18 and DeiT-tiny only grow ~3x over the same range because they
+    downsample aggressively. The pools restore that behaviour, and as a
+    side effect keep PrimaryCaps' depthwise kernel small (12x12 rather than
+    107x107 at 224x224).
     """
     size = _conv2d_out_size(size, kernel_size=5)
+    if n_pools > 0:
+        size //= 2
     size = _conv2d_out_size(size, kernel_size=3)
+    if n_pools > 1:
+        size //= 2
     size = _conv2d_out_size(size, kernel_size=3)
+    if n_pools > 2:
+        size //= 2
     size = _conv2d_out_size(size, kernel_size=3, stride=2)
     return size
 
@@ -42,26 +75,24 @@ class EfficientCapsNet(nn.Module):
         self.conv4 = nn.Conv2d(64, 128, 3, stride=2)
         self.bn4 = nn.BatchNorm2d(128)
 
+        # Number of 2x pools inserted into the stem. 0 at 32x32 (identical to
+        # the original architecture), 3 at 224x224.
+        self.n_stem_pools = _num_stem_pools(max(input_size[1], input_size[2]))
+        self.pool = nn.MaxPool2d(2)  # stateless, so one instance is reused
+
         # PrimaryCaps' depthwise conv must collapse the conv stem's output
         # feature map down to exactly 1x1 (its forward() reshapes straight
         # to (batch, num_capsules, dim_capsules) with no spatial dims left).
         # So its kernel size has to equal the stem's output spatial size,
-        # which depends on input_size -- computed here instead of the
-        # original hardcoded 11 (valid only for 32x32 input).
-        h_out = _capsnet_stem_out_size(input_size[1])
-        w_out = _capsnet_stem_out_size(input_size[2])
+        # which depends on input_size *and* on how many pools were inserted.
+        h_out = _capsnet_stem_out_size(input_size[1], self.n_stem_pools)
+        w_out = _capsnet_stem_out_size(input_size[2], self.n_stem_pools)
         if h_out <= 0 or w_out <= 0:
             raise ValueError(
                 f"input_size {input_size} is too small for EfficientCapsNet's "
                 "conv stem (needs roughly >=16x16 after the 4 conv layers)."
             )
         primary_kernel_size = h_out if h_out == w_out else (h_out, w_out)
-        # Note: PrimaryCaps' depthwise conv kernel scales with input_size (e.g.
-        # ~11x11 for 32x32 input vs. ~122x122 for 254x254 input). It's still a
-        # valid conv (kernel == remaining feature map, output is 1x1), but the
-        # per-sample compute/memory of that single depthwise layer grows
-        # roughly with input_size^4, so training at native 254x254 is
-        # substantially slower/heavier than at smaller configured sizes.
 
         self.primary_caps = PrimaryCaps(
             in_channels=128, kernel_size=primary_kernel_size, capsule_size=(16, 8)
@@ -78,8 +109,14 @@ class EfficientCapsNet(nn.Module):
 
     def forward(self, x):
         x = torch.relu(self.bn1(self.conv1(x)))
+        if self.n_stem_pools > 0:
+            x = self.pool(x)
         x = torch.relu(self.bn2(self.conv2(x)))
+        if self.n_stem_pools > 1:
+            x = self.pool(x)
         x = torch.relu(self.bn3(self.conv3(x)))
+        if self.n_stem_pools > 2:
+            x = self.pool(x)
         x = torch.relu(self.bn4(self.conv4(x)))
         x = self.primary_caps(x)
         x = self.routing_caps(x)
@@ -87,12 +124,35 @@ class EfficientCapsNet(nn.Module):
 
 
 class ReconstructionNet(nn.Module):
-    def __init__(self, input_size=(3, 32, 32), num_classes=10, num_capsules=16):
+    def __init__(self, input_size=(3, 32, 32), num_classes=10, num_capsules=16,
+                 recon_size=None):
+        """
+        Args:
+            recon_size (int | None): Side length the decoder actually
+                reconstructs at, bilinearly upsampled back to `input_size`
+                before being returned so the reconstruction loss is
+                unchanged. `None` (the default) reconstructs at full
+                `input_size`, matching the original behaviour exactly.
+
+                This exists because fc3 is `1024 -> prod(input_size)`: 3.1M
+                parameters at 32x32 but 154M at 224x224, where it would be
+                ~97% of the whole model's parameter count and ~2.5 GB of
+                Adam state. Setting recon_size=32 at 224x224 input keeps the
+                decoder the same size it is in the CIFAR configuration, so
+                parameter counts stay comparable across resolutions and the
+                capsule trunk isn't buried under a decoder an order of
+                magnitude larger than itself.
+        """
         super(ReconstructionNet, self).__init__()
-        self.input_size = input_size
+        self.input_size = tuple(input_size)
+        if recon_size is None:
+            self.out_size = self.input_size
+        else:
+            self.out_size = (self.input_size[0], recon_size, recon_size)
+
         self.fc1 = nn.Linear(in_features=num_capsules * num_classes, out_features=512)
         self.fc2 = nn.Linear(512, 1024)
-        self.fc3 = nn.Linear(1024, np.prod(input_size))
+        self.fc3 = nn.Linear(1024, int(np.prod(self.out_size)))
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -104,7 +164,12 @@ class ReconstructionNet(nn.Module):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
         x = torch.sigmoid(self.fc3(x))
-        return x.view(-1, *self.input_size)  # reshape
+        x = x.view(-1, *self.out_size)  # reshape
+        if self.out_size != self.input_size:
+            x = F.interpolate(
+                x, size=self.input_size[1:], mode="bilinear", align_corners=False
+            )
+        return x
 
 
 class FinalCapsNet(nn.Module):
@@ -113,7 +178,8 @@ class FinalCapsNet(nn.Module):
         input_size=(3, 32, 32),
         num_classes=10,
         capsule_dim=16,
-        use_background_class=False
+        use_background_class=False,
+        recon_size=None
     ):
         super(FinalCapsNet, self).__init__()
 
@@ -125,7 +191,9 @@ class FinalCapsNet(nn.Module):
         self.efficient_capsnet = EfficientCapsNet(input_size, n_out_caps, capsule_dim)
 
         self.mask = CapsMask()
-        self.generator = ReconstructionNet(input_size, n_out_caps, capsule_dim)
+        self.generator = ReconstructionNet(
+            input_size, n_out_caps, capsule_dim, recon_size=recon_size
+        )
 
     def forward(self, x, y_true=None, mode='train'):
         x, x_len = self.efficient_capsnet(x)

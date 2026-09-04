@@ -13,10 +13,11 @@ def update_recursive(d, u):
 # resnet = read_yaml('config-resnet-18.yaml')
 config = read_yaml('config-flame.yaml')
 ecaps = read_yaml('config-ecaps-flame.yaml')
-deit = read_yaml('config-deit-tiny-flame.yaml')
-resnet = read_yaml('config-resnet-18-flame.yaml')
+# deit = read_yaml('config-deit-tiny-flame.yaml')
+# resnet = read_yaml('config-resnet-18-flame.yaml')
 
-models = (ecaps, deit, resnet,)
+# models = (ecaps, deit, resnet,)
+models = (ecaps,)
 databases = (
         # {'name':'cifar_10', 'type':'Cifar10DataLoader'},
         {'name':'flame', 'type':'FlameDataLoader'},

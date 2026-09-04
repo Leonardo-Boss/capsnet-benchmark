@@ -40,7 +40,17 @@ class PrimaryCaps(nn.Module):
 
     def forward(self, x):
         x = self.dw_conv2d(x)
-        x = x.view(-1, self.num_capsules, self.dim_capsules)  # reshape
+        if x.shape[-2:] != (1, 1):
+            raise ValueError(
+                f"PrimaryCaps expected a 1x1 spatial output from its depthwise "
+                f"conv but got {tuple(x.shape[-2:])}. kernel_size="
+                f"{self.kernel_size} does not match the incoming feature map "
+                f"size, and the reshape below would silently fold the spatial "
+                f"positions into the batch dimension."
+            )
+        # shape[0], not -1, so a future mismatch raises above instead of
+        # quietly producing more capsule sets than there are images
+        x = x.view(x.shape[0], self.num_capsules, self.dim_capsules)  # reshape
         return self.squash(x)
 
 
