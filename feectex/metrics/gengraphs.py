@@ -29,6 +29,7 @@ MODEL_NAMES = {
 
 AUGMENTATION_NAMES = {
     "none": "No augmentation",
+    "standard": "Standard augmentation",
     "strong": "Strong augmentation",
 }
 

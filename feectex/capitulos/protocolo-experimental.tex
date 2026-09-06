@@ -1,0 +1,465 @@
+% =====================================================================
+%  EXPERIMENTAL PROTOCOL -- skeleton
+%  Import with \input{experimental_protocol} from your main .tex
+%
+%  Required packages (add to your preamble if not already there):
+%    \usepackage{booktabs}
+%    \usepackage{multirow}
+%    \usepackage{amsmath,amssymb}
+%    \usepackage{siunitx}       % optional, for aligned numeric columns
+%    \usepackage{graphicx}
+%
+%  If your document class is `article`, replace \chapter -> \section
+%  and demote everything else one level.
+% =====================================================================
+
+\chapter{Experimental Protocol}
+\label{ch:protocol}
+
+% TODO: one-paragraph roadmap of the chapter.
+Este capítulo especifica o delineamento experimental utilizado para comparar
+\textsc{Efficient-CapsNet}, \textsc{ResNet-18} e \textsc{DeiT-Tiny}
+sob variações controladas do tamanho do conjunto de treinamento, da intensidade
+da augmentação e da semente aleatória, juntamente com o procedimento de avaliação
+utilizado para investigar a robustez a transformações nunca observadas durante
+o treinamento.
+
+% ---------------------------------------------------------------------
+\section{Objectives and Hypotheses}
+\label{sec:protocol:hypotheses}
+
+% TODO: restate the claim from the literature you are testing
+% (capsule networks retain an advantage in (i) equivariance /
+% viewpoint robustness and (ii) the low-data regime) and turn it into
+% falsifiable predictions.
+
+\begin{description}
+\item[RQ1 (Equivariância / robustez).]
+As redes de cápsulas sofrem menor degradação do que os modelos
+convolucionais e baseados em atenção quando avaliadas sob transformações
+ausentes da distribuição de treinamento e, em particular, sob grandes
+rotações?
+\item[RQ2 (Eficiência de dados).]
+A diferença de acurácia entre as arquiteturas aumenta em favor das
+cápsulas à medida que a fração de dados de treinamento disponíveis
+diminui?
+\item[RQ3 (Interação com augmentação).]
+Qualquer vantagem das cápsulas é uma propriedade arquitetural ou é
+recuperada pelos modelos de referência quando uma augmentação explícita
+é aplicada?
+\end{description}
+
+\noindent
+As hipóteses correspondentes são apresentadas abaixo, e cada uma é associada
+à métrica e ao teste estatístico utilizados para aceitá-la ou rejeitá-la na
+Seção~\ref{sec:protocol:stats}.
+
+\begin{description}
+  \item[H1.] % TODO: e.g. retention ratio R_c is higher for ECapsNet at
+             % matched clean accuracy, for c = large rotation.
+  \item[H2.] % TODO: e.g. accuracy drop from f=1.0 to f=0.33 is smaller
+             % for ECapsNet.
+  \item[H3.] % TODO: e.g. the H1/H2 effects shrink to within noise once
+             % the strong augmentation regime is used.
+\end{description}
+
+% ---------------------------------------------------------------------
+\section{Datasets}
+\label{sec:protocol:data}
+
+\subsection{CIFAR-10}
+O conjunto de dados CIFAR-10 é um benchmark amplamente utilizado para avaliação de modelos de classificação de imagens. Ele é composto por 60.000 imagens coloridas, com resolução de \(32\times32\) pixels, distribuídas em 10 classes, com 6.000 imagens por classe. O conjunto é dividido em 50.000 imagens para treinamento e 10.000 imagens para teste.
+
+O conjunto de teste é constituído por 10.000 imagens. O conjunto de teste contém exatamente 1.000 imagens selecionadas aleatoriamente de cada classe. O conjunto de treinamento como um todo possui exatamente 5.000 imagens de cada classe.
+
+As dez categorias do CIFAR-10 são: avião, automóvel, pássaro, gato, cervo, cachorro, sapo, cavalo, navio e caminhão. A resolução reduzida das imagens e a diversidade dos objetos representados tornam o CIFAR-10 um benchmark adequado para comparar diferentes arquiteturas de redes neurais.
+
+Fonte: CIFAR-10, University of Toronto, acesso em 14 de agosto de 2026.
+
+\subsection{FLAME}
+O FLAME (Fire Luminosity Airborne-based Machine learning Evaluation) é um conjunto de dados de imagens aéreas desenvolvido para pesquisas relacionadas à detecção e segmentação de incêndios. O dataset foi obtido durante uma queima controlada de pilhas de material combustível (prescribed pile burn) realizada no norte do Arizona, Estados Unidos, utilizando veículos aéreos não tripulados (UAVs).
+
+Para a tarefa de classificação de incêndio, o dataset disponibiliza 47.992 quadros de resolução 254x254 pixels, sendo 39.375 imagens destinadas ao treinamento e 8.617 ao teste. Cada quadro é rotulado em uma das duas categorias: Fire ou Non-Fire. Para o Treinamento são 14.357 imagens Non-Fire e 25018 Fire.
+
+Esse dataset é particularmente relevante para sistemas automatizados de monitoramento e detecção de incêndios em ambientes florestais e áreas de queima controlada.
+
+Fonte: FLAME Dataset, IEEE DataPort, DOI: 10.21227/qad6-r683, acesso em 26 de agosto de 2026.
+
+\subsection{Splits and preprocessing}
+% TODO: fill in.
+Uma fração fixa de $\rho_{\text{val}} = 0.1$ do conjunto de treinamento é
+separada para validação e seleção do modelo; o conjunto oficial de teste é
+utilizado somente para a avaliação final apresentada no
+Capítulo~\ref{ch:results}. % TODO: corrigir referência cruzada
+
+Para o conjunto de dados FLAME as imagens são redimensionadas para 224x224 pixels.
+
+\begin{table}[t]
+  \centering
+  \caption{Datasets used in this study.}
+  \label{tab:datasets}
+  \begin{tabular}{lccccc}
+    \toprule
+    Dataset & Classes & Train & Val & Test & Input size \\
+    \midrule
+    CIFAR-10 & 10 & 50.000 & & 10.000 & $3\times32\times32$ \\
+    FLAME    & 2  & 39.375 & & & $3\times224\times224$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+\subsection{Training from scratch and capacity matching}
+% TODO: state explicitly that all models are trained from random
+% initialisation (no ImageNet pre-training), since pre-training would
+% confound the data-efficiency comparison.
+% TODO: justify the comparison basis -- parameter count, GMACs, or
+% neither -- and acknowledge the residual capacity mismatch.
+
+\begin{table}[t]
+  \centering
+  \caption{Model complexity. Parameters and multiply--accumulate
+  operations (MACs) are measured for a single forward pass at the input
+  resolution of each dataset.}
+  \label{tab:model-complexity}
+  \begin{tabular}{lcccc}
+    \toprule
+    \multirow{2}{*}{Model} & \multicolumn{2}{c}{CIFAR-10} & \multicolumn{2}{c}{FLAME} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+     & Params (M) & GMACs & Params (M) & GMACs \\
+    \midrule
+    Efficient-CapsNet & & & & \\
+    ResNet-18         & & & & \\
+    DeiT-Tiny         & & & & \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------
+\section{Training Protocol}
+\label{sec:protocol:training}
+
+\subsection{Objectives}
+% TODO: define the margin loss + reconstruction term used for the
+% capsule model:
+\begin{equation}
+  \mathcal{L}_{k} = T_{k}\max(0, m^{+} - \lVert \mathbf{v}_{k}\rVert)^{2}
+  + \lambda\,(1 - T_{k})\max(0, \lVert \mathbf{v}_{k}\rVert - m^{-})^{2},
+  \label{eq:margin}
+\end{equation}
+with $m^{+} = 0.9$, $m^{-} = 0.1$, $\lambda = 0.5$, and a mean-squared
+reconstruction term weighted by $\alpha = 5\times10^{-4}$.
+% TODO: state that ResNet-18 and DeiT-Tiny are trained with softmax
+% cross-entropy, and discuss whether the differing objective is a
+% confound for the comparison (it is; declare it).
+
+\subsection{Optimisation}
+% TODO: fill in / correct against the configuration actually used.
+
+\begin{table}[t]
+  \centering
+  \caption{Training hyper-parameters. Identical across all
+  architectures, data fractions, augmentation regimes and seeds unless
+  stated otherwise.}
+  \label{tab:hyperparams}
+  \begin{tabular}{ll}
+    \toprule
+    Setting & Value \\
+    \midrule
+    Optimiser              & Adam \\
+    Initial learning rate  & $5\times10^{-4}$ \\
+    LR schedule            & Exponential, $\gamma = 0.98$ per epoch \\
+    Batch size             & % TODO (per dataset)
+                             \\
+    Epochs (max)           & 100 \\
+    Weight decay           & % TODO
+                             \\
+    Early stopping         & % TODO: patience on val.\ loss, or disabled
+                             \\
+    Model selection        & Lowest validation loss \\
+    Precision              & % TODO: fp32 / amp
+                             \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Hardware and runtime}
+% TODO: GPU model, driver / CUDA version, PyTorch version,
+% wall-clock per epoch, total compute budget for the full grid.
+
+% ---------------------------------------------------------------------
+\section{Experimental Design}
+\label{sec:protocol:design}
+
+The study is a full factorial design over four factors, summarised in
+Table~\ref{tab:design}.
+
+\begin{table}[t]
+  \centering
+  \caption{Factors and levels. The complete grid comprises
+  $3 \times 2 \times 3 \times 3 \times 3 = 162$ training runs.}
+  \label{tab:design}
+  \begin{tabular}{lll}
+    \toprule
+    Factor & Levels & $|{\cdot}|$ \\
+    \midrule
+    Architecture      & Efficient-CapsNet, ResNet-18, DeiT-Tiny & 3 \\
+    Dataset           & CIFAR-10, FLAME                          & 2 \\
+    Data fraction $f$ & $0.33$, $0.66$, $1.00$                   & 3 \\
+    Augmentation $a$  & none, standard, strong                   & 3 \\
+    Seed $s$          & $1$, $2$, $3$                            & 3 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Data-fraction ablation}
+\label{sec:protocol:fraction}
+% TODO: state that subsampling is applied to the training split only,
+% after the validation split is removed, so the validation and test
+% sets are identical across fractions and comparisons remain fair.
+% TODO: state whether the subsample is class-stratified. (It is not,
+% in the current implementation -- either stratify or report the
+% realised class distribution per fraction.)
+% TODO: state whether the epoch budget is held fixed at 100 epochs
+% (fewer gradient steps at small $f$) or matched in steps. This choice
+% materially affects the data-efficiency conclusion and must be
+% explicit.
+
+\subsection{Augmentation ablation}
+\label{sec:protocol:aug}
+
+\begin{table}[t]
+  \centering
+  \caption{Training-time augmentation regimes. All regimes are followed
+  by conversion to tensor and per-channel normalisation.}
+  \label{tab:aug-regimes}
+  \begin{tabular}{ll}
+    \toprule
+    Regime & Operations \\
+    \midrule
+    none     & --- \\
+    standard & Random crop ($p=4$ padding), horizontal flip, rotation $\pm15^{\circ}$ \\
+    strong   & standard $+$ RandAugment $+$ Random Erasing \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% TODO: give the RandAugment magnitude / number of ops and the Random
+% Erasing probability and scale, rather than relying on defaults.
+% TODO: note that the training rotation range ($\pm15^{\circ}$) is
+% deliberately disjoint from the large-rotation probe of
+% Section~\ref{sec:protocol:rotation}, so that probe measures genuinely
+% unseen transformation magnitudes.
+
+\subsection{Replication}
+% TODO: three seeds per cell; the seed controls initialisation,
+% augmentation sampling, the training/validation split and the
+% data-fraction subsample.
+
+% ---------------------------------------------------------------------
+\section{Evaluation Protocol}
+\label{sec:protocol:eval}
+
+Every trained model is evaluated with the checkpoint selected on
+validation loss, under three evaluation conditions.
+
+\subsection{In-distribution evaluation}
+% TODO: clean test split, normalisation only, no augmentation.
+% This provides the reference accuracy $A^{\text{clean}}$ against which
+% all robustness numbers are normalised.
+
+\subsection{Unseen transformations}
+\label{sec:protocol:unseen}
+Corruptions are applied to the test images in $[0,1]$, i.e.\ after
+conversion to tensor and before normalisation, so that the perturbation
+magnitudes are expressed in image space.
+
+\begin{table}[t]
+  \centering
+  \caption{Unseen transformation suite. None of these operations
+  appears in any training augmentation regime.}
+  \label{tab:unseen}
+  \begin{tabular}{lll}
+    \toprule
+    Transformation & Parameter & Value \\
+    \midrule
+    Gaussian noise     & $\sigma$                & $0.08$ \\
+    Gaussian blur      & kernel, $\sigma$        & $5$, $1.5$ \\
+    Brightness shift   & factor                  & $1.6$ \\
+    Contrast shift     & factor                  & $0.4$ \\
+    Occlusion          & patch area fraction     & $0.25$ \\
+    Large rotation     & $\theta \sim \mathcal{U}(-90^{\circ}, 90^{\circ})$ & $90^{\circ}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% TODO: state whether "all" means each corruption evaluated separately
+% and then averaged, or all six composed into a single pipeline.
+% TODO: state the seed used for the stochastic corruptions (noise,
+% occlusion, rotation angle) so the corrupted test set is identical
+% across models.
+
+\subsection{Rotation-specific probe}
+\label{sec:protocol:rotation}
+% TODO: this is the direct test of H1. Consider sweeping
+% $\theta \in \{0, 15, 30, \dots, 180\}^{\circ}$ deterministically
+% rather than sampling once, and plotting accuracy against $\theta$
+% per architecture -- a curve is far more convincing than a single
+% number at $\pm90^{\circ}$.
+
+\subsection{Evaluation under augmentation regimes}
+% TODO: disambiguate. The evaluation grid crosses each trained model
+% with the none / standard / strong pipelines applied at test time.
+% Say whether this is (i) test-time distribution shift, i.e.\ the
+% training augmentations applied to test images to measure sensitivity
+% to in-distribution perturbations, or (ii) test-time augmentation with
+% prediction averaging over $n$ samples. These are different
+% experiments and the reader must know which one is reported.
+
+% ---------------------------------------------------------------------
+\section{Metrics}
+\label{sec:protocol:metrics}
+
+\subsection{Classification quality}
+Top-1 accuracy is the primary metric. Per-class true positives, false
+positives, false negatives and true negatives are accumulated over each
+epoch, from which per-class precision, recall and $F_1$ are derived;
+macro-averaged $F_1$ is reported for FLAME to account for class
+imbalance.
+% TODO: confirm which of these you actually report in the results
+% chapter and drop the rest.
+
+\subsection{Robustness}
+For a corruption $c$, the retention ratio
+\begin{equation}
+  R_{c} = \frac{A^{c}}{A^{\text{clean}}}
+  \label{eq:retention}
+\end{equation}
+normalises robustness by clean accuracy, so that architectures with
+different in-distribution performance remain comparable. The absolute
+degradation $A^{\text{clean}} - A^{c}$ is reported alongside it.
+% TODO: note that $R_c$ is only meaningful when clean accuracies are
+% not wildly different; if they are, say so and interpret with care.
+% TODO: for the two-class FLAME task, state the chance level (and the
+% majority-class baseline) so that near-chance robustness scores are
+% not mistaken for graceful degradation.
+
+\subsection{Data efficiency}
+% TODO: define your data-efficiency statistic, e.g.
+\begin{equation}
+  \Delta_{f} = A_{f=1.00} - A_{f=0.33},
+  \label{eq:data-eff}
+\end{equation}
+% or the area under the accuracy-vs-fraction curve. State which.
+
+\subsection{Efficiency}
+% TODO: parameters, GMACs, wall-clock seconds per epoch, peak GPU
+% memory. All are logged per epoch by the training harness.
+
+% ---------------------------------------------------------------------
+\section{Statistical Analysis}
+\label{sec:protocol:stats}
+
+% TODO: fill in and commit to this before looking at the results.
+All results are reported as mean $\pm$ standard deviation over the
+three seeds. % TODO: with $n=3$ the standard deviation is a weak
+% estimate -- prefer reporting individual seed values in an appendix,
+% and effect sizes with confidence intervals over $p$-values.
+
+% TODO: choose and justify one:
+%   (a) mixed-effects / repeated-measures ANOVA with architecture,
+%       fraction and augmentation as fixed effects and seed as random;
+%   (b) paired comparisons per cell (same seeds across architectures)
+%       with a nonparametric test and Holm correction for the number
+%       of comparisons;
+%   (c) bootstrap confidence intervals on the test set.
+% State the significance level and the multiple-comparison correction
+% for the 162-run grid.
+
+% ---------------------------------------------------------------------
+\section{Reproducibility}
+\label{sec:protocol:repro}
+
+% TODO: seeds fixed for PyTorch, NumPy and CUDA; cuDNN deterministic
+% mode enabled and benchmarking disabled; per-run YAML configuration
+% archived alongside the checkpoints; per-epoch metrics written to CSV;
+% code and configurations released at <URL>.
+% TODO: note the determinism check (batch hashing) used to verify that
+% augmentation streams are identical across architectures for a given
+% seed, if you report it.
+
+% ---------------------------------------------------------------------
+\section{Reporting Templates}
+\label{sec:protocol:templates}
+% Delete this section before submission -- it exists so the results
+% chapter has a fixed shape to fill.
+
+\begin{table}[t]
+  \centering
+  \caption{Clean test accuracy (\%) by architecture, data fraction and
+  augmentation regime. Mean $\pm$ standard deviation over three seeds.
+  \textsc{Dataset}: % TODO
+  }
+  \label{tab:main-results}
+  \begin{tabular}{llccc}
+    \toprule
+    \multirow{2}{*}{Model} & \multirow{2}{*}{Aug.} & \multicolumn{3}{c}{Data fraction $f$} \\
+    \cmidrule(lr){3-5}
+     & & $0.33$ & $0.66$ & $1.00$ \\
+    \midrule
+    \multirow{3}{*}{Efficient-CapsNet}
+      & none     & & & \\
+      & standard & & & \\
+      & strong   & & & \\
+    \midrule
+    \multirow{3}{*}{ResNet-18}
+      & none     & & & \\
+      & standard & & & \\
+      & strong   & & & \\
+    \midrule
+    \multirow{3}{*}{DeiT-Tiny}
+      & none     & & & \\
+      & standard & & & \\
+      & strong   & & & \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \caption{Retention ratio $R_{c}$ under unseen transformations, at
+  $f = 1.00$. % TODO: repeat or aggregate over fractions
+  }
+  \label{tab:robustness}
+  \begin{tabular}{lccccccc}
+    \toprule
+    Model & Noise & Blur & Bright. & Contrast & Occl. & Rot.\ $90^{\circ}$ & Mean \\
+    \midrule
+    Efficient-CapsNet & & & & & & & \\
+    ResNet-18         & & & & & & & \\
+    DeiT-Tiny         & & & & & & & \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% TODO: figure -- accuracy vs.\ data fraction, one panel per dataset,
+% one line per architecture, shaded seed variance.
+% TODO: figure -- accuracy vs.\ rotation angle, one panel per
+% augmentation regime.
+
+% ---------------------------------------------------------------------
+\section{Threats to Validity}
+\label{sec:protocol:threats}
+
+% TODO: be candid here; reviewers will find these anyway.
+% - Different training objectives (margin + reconstruction vs.\
+%   cross-entropy) confound the architectural comparison.
+% - A single hyper-parameter configuration is shared across all three
+%   architectures; it may favour one of them. State whether any tuning
+%   was performed and on which split.
+% - The capsule model's primary-capsule geometry changes substantially
+%   between 32x32 and 224x224 inputs.
+% - $n = 3$ seeds limits the power of the statistical comparisons.
+% - FLAME frames are temporally correlated; if the split is random
+%   rather than by flight/sequence, test performance is optimistic.
+%   State how the split was made.

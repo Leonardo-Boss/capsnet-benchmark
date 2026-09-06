@@ -1,11 +1,12 @@
 
 %!TeX root = ../principal.tex
 %!TeX encoding = utf-8
-\chapter{Artigos}
+\chapter{Modelos}
 \label{cap3}
 Comparamos três famílias de modelos representativas, que incorporam diferentes vieses indutivos:
 
 \begin{itemize}
+
     \item \textbf{Redes de Cápsulas (Efficient-CapsNet)} \citar{mazzia2021efficient}, projetadas com fortes vieses de equivariância e de hierarquia parte-todo [Sabour et al., 2017], e historicamente apontadas como vantajosas em cenários com poucos dados e na robustez a transformações.
 
     \item \textbf{CNNs Residuais (ResNet-18)} \citar{he2016deep}, uma das arquiteturas convolucionais modernas mais amplamente utilizadas, representando o viés indutivo dominante de equivariância à translação e aprendizado hierárquico de características por meio de conexões residuais.
@@ -14,3 +15,102 @@ Comparamos três famílias de modelos representativas, que incorporam diferentes
 \end{itemize}
 
 Os tamanhos dos modelos foram deliberadamente mantidos comparáveis e adequados para treinamento em uma única GPU (RTX 2060 de 6 GB), garantindo que as diferenças de desempenho possam ser atribuídas principalmente aos vieses indutivos das arquiteturas, e não a diferenças de capacidade ou de otimização.
+
+% ---------------------------------------------------------------------
+\section{Arquitetura e Modificações}
+\label{sec:protocol:models}
+
+As três arquiteturas são disponibilizadas por meio de uma única interface
+\texttt{forward(x,\allowbreak{} y\_true,\allowbreak{} mode)}, de modo que o treinador, a infraestrutura
+de registro e o sistema de avaliação sejam compartilhados integralmente entre
+os modelos; apenas a arquitetura e a função de perda diferem.
+
+\subsection{Efficient-CapsNet}
+\label{sec:protocol:models:ecaps}
+
+A rede capsular adotada segue a arquitetura Efficient-CapsNet
+\citar{mazzia2021efficient}. O extrator convolucional é composto por
+quatro camadas, todas seguidas de normalização em lote e ativação
+ReLU: uma convolução $5\times5$ com 32 canais, duas convoluções
+$3\times3$ com 64 canais e uma convolução $3\times3$ com 128 canais e
+passo 2. Nenhuma delas utiliza preenchimento, de modo que o mapa de
+características é progressivamente reduzido.
+
+A camada \textit{PrimaryCaps} converte esse mapa em cápsulas por meio
+de uma convolução \textit{depthwise} cujo núcleo tem exatamente as
+dimensões espaciais remanescentes do extrator, colapsando o mapa para
+$1\times1$; a saída é reorganizada em 16 cápsulas de dimensão 8 e
+normalizada pela função \textit{squash}. Em seguida, a camada
+\textit{RoutingCaps} substitui o roteamento iterativo por acordo por um
+mecanismo de autoatenção não iterativo: os vetores de predição são
+obtidos por um produto tensorial entre as cápsulas de entrada e a
+matriz de pesos $\mathbf{W} \in \mathbb{R}^{N_1 \times N_0 \times D_0
+\times D_1}$, e os coeficientes de acoplamento resultam da
+autossimilaridade entre esses vetores, escalonada por $\sqrt{D_1}$,
+seguida de \textit{softmax} e de um termo de viés aprendido. A saída
+consiste em $N$ cápsulas de dimensão 16, uma por classe.
+
+O comprimento euclidiano de cada cápsula de saída é utilizado como
+escore da classe correspondente. Adicionalmente, um decodificador
+totalmente conectado (camadas de 512 e 1024 unidades, seguidas de uma
+projeção para a dimensionalidade da imagem de entrada com ativação
+sigmoide) reconstrói a imagem a partir das cápsulas mascaradas pelo
+rótulo verdadeiro durante o treinamento, ou pela cápsula de maior
+comprimento durante a inferência. A perda de reconstrução atua como
+regularizador, conforme descrito na Seção~\ref{sec:protocol:training}.
+
+% ATENÇÃO -- confundidor que precisa ser declarado explicitamente:
+Cabe registrar que o núcleo da convolução \textit{depthwise} da camada
+\textit{PrimaryCaps} é determinado pela resolução de entrada: ele mede
+$11\times11$ para entradas $32\times32$ (CIFAR-10), mas $107\times107$
+para entradas $224\times224$ (FLAME). Da mesma forma, a camada final do
+decodificador de reconstrução cresce proporcionalmente ao número de
+pixels da imagem. Consequentemente, o número de parâmetros e o custo
+computacional do modelo capsular não escalam de maneira comparável aos
+das arquiteturas de referência entre os dois conjuntos de dados, o que
+é considerado na análise da Seção~\ref{sec:protocol:threats}.
+% TODO: preencher os valores exatos de parâmetros/GMACs na
+% Tabela~\ref{tab:model-complexity} para quantificar essa diferença.
+
+\subsection{ResNet-18}
+\label{sec:protocol:models:resnet}
+
+A segunda arquitetura de referência é a ResNet-18 \citar{he2016deep},
+composta por quatro estágios de blocos residuais básicos com dois
+caminhos convolucionais $3\times3$ cada, conexões de atalho por
+identidade e normalização em lote.
+
+Para as entradas de baixa resolução do CIFAR-10, adota-se a adaptação
+usual do extrator inicial: a convolução $7\times7$ com passo 2 é
+substituída por uma convolução $3\times3$ com passo 1 e preenchimento
+1, e a camada de \textit{max-pooling} subsequente é removida. Sem essa
+alteração, a imagem $32\times32$ seria reduzida a $8\times8$ antes do
+primeiro bloco residual, descartando informação espacial essencial. Os
+pesos da nova convolução são inicializados segundo a distribuição
+normal de He.
+
+% TODO: confirmar e afirmar explicitamente -- a adaptação é aplicada
+% apenas ao CIFAR-10, mantendo-se o extrator original de $7\times7$
+% com passo 2 para o FLAME (entradas $224\times224$, resolução para a
+% qual a arquitetura foi originalmente projetada)?
+
+\subsection{DeiT-Tiny}
+\label{sec:protocol:models:deit}
+
+A terceira arquitetura é a DeiT-Tiny \citar{touvron2021training}, um
+\textit{Vision Transformer} com 12 blocos, dimensão de imersão 192 e 3
+cabeças de atenção. A destilação por token proposta no trabalho
+original não é empregada aqui, uma vez que exigiria um modelo professor
+e comprometeria a comparação entre arquiteturas treinadas do zero.
+
+% TODO: confirmar se os patches estão corretos
+O tamanho do \textit{patch} é ajustado à resolução de cada conjunto de
+dados: \textit{patches} de $4\times4$ para as entradas $32\times32$ do
+CIFAR-10, resultando em 64 tokens, e \textit{patches} de $16\times16$
+para as entradas $224\times224$ do FLAME, resultando em 196 tokens.
+Como o número de tokens difere da configuração original da
+arquitetura, as imersões posicionais são reinstanciadas com as
+dimensões correspondentes e aprendidas do zero, o que também inviabiliza
+o aproveitamento de pesos pré-treinados --- coerente com o protocolo de
+treinamento a partir de inicialização aleatória adotado para todos os
+modelos.
