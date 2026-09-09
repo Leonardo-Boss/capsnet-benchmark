@@ -1,3 +1,6 @@
+import math
+import re
+import warnings
 from pathlib import Path
 from typing import Any, Callable
 
@@ -38,6 +41,11 @@ class BaseDataLoader(DataLoader):
         num_workers: int,
         collate_fn: Callable = default_collate,
         data_fraction: float = 1.0,
+        groups: np.ndarray | None = None,
+        strata: np.ndarray | None = None,
+        group_buffer: int = 1,
+        group_select: str = "random",
+        valid_dataset: Any | None = None,
     ):
         """Initialize loader class with the given dataset and parameters.
 
@@ -58,12 +66,73 @@ class BaseDataLoader(DataLoader):
                 fair. The subset is chosen randomly, not just the first N
                 samples. Defaults to 1.0
                 (use all training data).
+            groups (np.ndarray | None, optional): Per-sample integer group id,
+                length `len(dataset)`. When given, the train/validation split
+                is made at the *group* level -- every sample of a group lands
+                entirely in train or entirely in validation, never both. Use
+                this whenever samples are not independent (e.g. consecutive
+                frames extracted from the same video), because an iid index
+                shuffle would otherwise put near-duplicates on both sides of
+                the split and inflate validation scores. Group ids are
+                assumed to be contiguous and ordered along the correlation
+                axis (time), so id `g` and `g+1` are neighbours -- that is
+                what `group_buffer` relies on. `None` keeps the original iid
+                behaviour, which is correct for genuinely independent samples
+                (MNIST, CIFAR-10). Defaults to None.
+            strata (np.ndarray | None, optional): Per-sample class label used
+                to pick validation groups stratified by class, so the
+                validation split keeps the dataset's class balance instead of
+                whatever the randomly drawn groups happen to contain. Only
+                used when `groups` is given. Defaults to None (unstratified).
+            group_buffer (int, optional): Number of neighbouring groups on
+                each side of every held-out group to drop from *training*
+                (they are not added to validation either -- they are simply
+                discarded). This removes the residual leakage at block
+                boundaries, where the last frame of a training block and the
+                first frame of the adjacent validation block are consecutive
+                video frames. Only used when `groups` is given. Defaults to 1.
+            group_select (str, optional): How validation groups are chosen.
+                "random" draws groups at random (within each stratum), giving
+                validation coverage across the whole recording. "tail" takes
+                the last groups of each stratum as one contiguous held-out
+                segment -- a stricter, more pessimistic estimate, since the
+                validation data is maximally separated in time from training.
+                Only used when `groups` is given. Defaults to "random".
+            valid_dataset (Any | None, optional): Alternative dataset object
+                to draw validation samples from, indexed identically to
+                `dataset`. Use this to serve validation images through an
+                eval-time transform (resize + normalize only) while training
+                images still go through the augmentation pipeline, so that
+                `val_loss` -- which drives model selection -- is measured on
+                clean images and is comparable across augmentation regimes.
+                Defaults to None (validation reuses `dataset`).
         """
         assert 0 < data_fraction <= 1, "data_fraction must be in (0, 1]"
+        assert group_select in ("random", "tail"), (
+            f"Unknown group_select '{group_select}'. Expected 'random' or 'tail'."
+        )
         self.data_fraction = data_fraction
+
+        self.groups = None if groups is None else np.asarray(groups)
+        self.strata = None if strata is None else np.asarray(strata)
+        self.group_buffer = group_buffer
+        self.group_select = group_select
+        self.valid_dataset = valid_dataset
 
         self.shuffle = shuffle
         self.n_samples = len(dataset)
+
+        if self.groups is not None and len(self.groups) != self.n_samples:
+            raise ValueError(
+                f"groups has length {len(self.groups)} but the dataset has "
+                f"{self.n_samples} samples."
+            )
+        if self.valid_dataset is not None and len(self.valid_dataset) != self.n_samples:
+            raise ValueError(
+                "valid_dataset must be indexed identically to dataset "
+                f"({len(self.valid_dataset)} vs {self.n_samples} samples)."
+            )
+
         self.validation_split = validation_split
         self.train_sampler, self.valid_sampler = self._split_sampler(
             self.validation_split
@@ -93,9 +162,6 @@ class BaseDataLoader(DataLoader):
                 validation set, or None if no validation split and no
                 data_fraction subsetting is configured.
         """
-        idx_full = np.arange(self.n_samples)
-        np.random.shuffle(idx_full)
-
         if split == 0.0:
             len_valid = 0
         elif isinstance(split, int):
@@ -107,14 +173,19 @@ class BaseDataLoader(DataLoader):
         else:
             len_valid = int(self.n_samples * split)
 
-        valid_idx = idx_full[0:len_valid]
-        train_idx = np.delete(idx_full, np.arange(0, len_valid))
+        if self.groups is None:
+            idx_full = np.arange(self.n_samples)
+            np.random.shuffle(idx_full)
+            valid_idx = idx_full[0:len_valid]
+            train_idx = np.delete(idx_full, np.arange(0, len_valid))
 
-        # subsample the training portion only -- validation stays full and
-        # identical across different data_fraction runs
-        if self.data_fraction < 1.0:
-            n_keep = max(1, int(len(train_idx) * self.data_fraction))
-            train_idx = np.random.choice(train_idx, size=n_keep, replace=False)
+            # subsample the training portion only -- validation stays full and
+            # identical across different data_fraction runs
+            if self.data_fraction < 1.0:
+                n_keep = max(1, int(len(train_idx) * self.data_fraction))
+                train_idx = np.random.choice(train_idx, size=n_keep, replace=False)
+        else:
+            train_idx, valid_idx = self._grouped_split(len_valid)
 
         # a sampler is now needed whenever we're subsetting the training
         # data -- either from validation_split or data_fraction -- so
@@ -133,12 +204,116 @@ class BaseDataLoader(DataLoader):
 
         return train_sampler, valid_sampler
 
+    def _grouped_split(self, len_valid: int) -> tuple[np.ndarray, np.ndarray]:
+        """Split train/validation at the group level rather than per sample.
+
+        Whole groups are assigned to one side of the split, so correlated
+        samples (e.g. consecutive video frames) can never appear on both
+        sides. Groups adjacent to a held-out group are dropped entirely
+        (`group_buffer`) to remove boundary leakage.
+
+        Args:
+            len_valid (int): Target number of validation *samples*. The
+                realised size will land near, but rarely exactly on, this
+                number, since groups are indivisible.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: (train_idx, valid_idx).
+        """
+        groups = self.groups
+        strata = (
+            self.strata
+            if self.strata is not None
+            else np.zeros(self.n_samples, dtype=np.int64)
+        )
+
+        valid_groups: list[int] = []
+        if len_valid > 0:
+            valid_fraction = len_valid / self.n_samples
+            for stratum in np.unique(strata):
+                in_stratum = strata == stratum
+                # unique() sorts, so group ids stay in temporal order here --
+                # "tail" depends on that, "random" does not care
+                s_groups = np.unique(groups[in_stratum])
+                # honour the fraction within each stratum so the validation
+                # split keeps the dataset's class balance
+                s_target = valid_fraction * in_stratum.sum()
+
+                order = (
+                    np.random.permutation(s_groups)
+                    if self.group_select == "random"
+                    else s_groups[::-1]  # last groups first == contiguous tail
+                )
+                taken = 0
+                for gid in order:
+                    if taken >= s_target:
+                        break
+                    valid_groups.append(int(gid))
+                    taken += int((groups == gid).sum())
+
+        valid_mask = np.isin(groups, valid_groups)
+
+        # drop the neighbours of every held-out group from training: the
+        # frames either side of a block boundary are consecutive in the
+        # source video, so keeping them would reintroduce exactly the
+        # leakage this split exists to prevent
+        blocked = set(valid_groups)
+        for gid in valid_groups:
+            for offset in range(1, self.group_buffer + 1):
+                blocked.add(gid - offset)
+                blocked.add(gid + offset)
+        train_mask = ~np.isin(groups, list(blocked))
+
+        train_idx = np.flatnonzero(train_mask)
+        valid_idx = np.flatnonzero(valid_mask)
+
+        # subsample training by group as well: pulling a random x% of
+        # *frames* from a 30fps recording barely reduces the information
+        # available (the discarded frames have near-identical neighbours),
+        # so a per-frame data_fraction would make the data-efficiency axis
+        # almost meaningless. Dropping whole blocks actually removes
+        # distinct content.
+        if self.data_fraction < 1.0 and len(train_idx) > 0:
+            train_idx = self._subsample_by_group(train_idx, strata)
+
+        np.random.shuffle(train_idx)
+        np.random.shuffle(valid_idx)
+        return train_idx, valid_idx
+
+    def _subsample_by_group(
+        self, train_idx: np.ndarray, strata: np.ndarray
+    ) -> np.ndarray:
+        """Keep a random `data_fraction` of whole training groups, per stratum."""
+        groups = self.groups
+        keep_idx: list[np.ndarray] = []
+
+        for stratum in np.unique(strata[train_idx]):
+            s_idx = train_idx[strata[train_idx] == stratum]
+            s_groups = np.unique(groups[s_idx])
+            target = max(1, int(round(len(s_idx) * self.data_fraction)))
+
+            taken, kept_groups = 0, []
+            for gid in np.random.permutation(s_groups):
+                if taken >= target:
+                    break
+                kept_groups.append(gid)
+                taken += int((groups[s_idx] == gid).sum())
+            keep_idx.append(s_idx[np.isin(groups[s_idx], kept_groups)])
+
+        return np.concatenate(keep_idx)
+
     def split_validation(self):
         """Get the validation set if configured."""
         if self.valid_sampler is None:
             return None
-        else:
-            return DataLoader(sampler=self.valid_sampler, **self.init_kwargs)
+
+        kwargs = dict(self.init_kwargs)
+        if self.valid_dataset is not None:
+            # same indices, eval-time transform -- val_loss is then measured
+            # on clean images and stays comparable across augmentation
+            # regimes, which matters because it is the model-selection metric
+            kwargs["dataset"] = self.valid_dataset
+        return DataLoader(sampler=self.valid_sampler, **kwargs)
 
 class MnistDataLoader(BaseDataLoader):
     """MNIST data loading class for Efficient CapsNet training.
@@ -506,6 +681,10 @@ class FlameDataLoader(BaseDataLoader):
         img_size: int = 224,
         augmentation: str = "standard",
         data_fraction: float = 1.0,
+        val_split_mode: str = "blocks",
+        block_size: int = 150,
+        block_buffer: int = 1,
+        clean_validation: bool = True,
     ):
         """Initializes the FlameDataLoader with the given parameters.
 
@@ -537,8 +716,60 @@ class FlameDataLoader(BaseDataLoader):
                 to "standard".
             data_fraction (float, optional): Fraction (0, 1] of the
                 training split to actually use. Ignored when
-                `training=False`. Defaults to 1.0.
+                `training=False`. Defaults to 1.0. Under the "blocks"/"tail"
+                split modes this drops whole blocks rather than scattered
+                individual frames -- see BaseDataLoader.
+            val_split_mode (str, optional): How the validation split is
+                carved out of `Training/`.
+
+                FLAME's training frames are extracted from continuous UAV
+                video, so consecutive frames are near-duplicates. An iid
+                per-frame split therefore leaks: nearly every validation
+                frame has an almost identical twin in training, and the model
+                scores >90% within one epoch by recognising backgrounds it
+                has already memorised rather than by learning what fire looks
+                like. That inflated number then drives `min val_loss` model
+                selection, which picks the most background-overfit
+                checkpoint, and it collapses on the official `Test/` split
+                (a separate recording).
+
+                - "blocks" (default): frames are sorted into temporal order
+                  and cut into contiguous blocks of `block_size`; whole
+                  blocks are held out. Validation still covers the whole
+                  recording, but no validation frame has a near-duplicate in
+                  training.
+                - "tail": holds out one contiguous segment at the end of each
+                  class's frame sequence. Strictest and most pessimistic --
+                  closest in spirit to the train/test separation of the
+                  official split.
+                - "random": the original iid per-frame behaviour. Kept only
+                  so the leaky baseline can be reproduced deliberately; it
+                  should not be used for reported results.
+
+                Defaults to "blocks".
+            block_size (int, optional): Frames per temporal block. At ~30fps,
+                150 frames is roughly a 5-second segment. Smaller blocks give
+                more independent validation units but leave adjacent blocks
+                more similar; larger blocks are stricter but coarser.
+                Defaults to 150.
+            block_buffer (int, optional): Blocks either side of each held-out
+                block that are discarded from training, so that frames
+                straddling a block boundary don't leak. Defaults to 1.
+            clean_validation (bool, optional): Serve validation images
+                through the eval transform (resize + normalize only) instead
+                of the training augmentation pipeline, so `val_loss` is
+                measured on clean images. Defaults to True.
+
+        Raises:
+            ValueError: If `val_split_mode` or `augmentation` is unknown, or
+                if the on-disk class folders don't match the expected layout.
         """
+        valid_modes = ("blocks", "tail", "random")
+        if val_split_mode not in valid_modes:
+            raise ValueError(
+                f"Unknown val_split_mode '{val_split_mode}'. "
+                f"Expected one of {valid_modes}."
+            )
         self.num_classes = 2
         self.img_size = img_size
 
@@ -557,16 +788,16 @@ class FlameDataLoader(BaseDataLoader):
                 f"but '{split_dir}' does not exist."
             )
 
-        if training:
-            image_transform = self._build_train_transform(augmentation)
-        else:
-            image_transform = transforms.Compose(
-                [
-                    transforms.Resize((img_size, img_size)),
-                    transforms.ToTensor(),
-                    transforms.Normalize(self.FLAME_MEAN, self.FLAME_STD),
-                ]
-            )
+        eval_transform = transforms.Compose(
+            [
+                transforms.Resize((img_size, img_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(self.FLAME_MEAN, self.FLAME_STD),
+            ]
+        )
+        image_transform = (
+            self._build_train_transform(augmentation) if training else eval_transform
+        )
 
         label_transform = transforms.Lambda(self.one_hot_encode)
 
@@ -575,6 +806,17 @@ class FlameDataLoader(BaseDataLoader):
             transform=image_transform,
             target_transform=label_transform,
         )
+
+        valid_dataset = None
+        if training and clean_validation and validation_split:
+            # second view of the same directory; ImageFolder sorts
+            # deterministically, so index i refers to the same file in both
+            valid_dataset = datasets.ImageFolder(
+                str(split_dir),
+                transform=eval_transform,
+                target_transform=label_transform,
+            )
+
         self.classes = self.dataset.classes
         if self.classes != ["Fire", "No_Fire"]:
             # ImageFolder sorts subfolder names alphabetically; this should
@@ -586,10 +828,80 @@ class FlameDataLoader(BaseDataLoader):
                 f"found {self.classes}."
             )
 
+        groups = strata = None
+        if training and val_split_mode != "random":
+            groups, strata = self._build_temporal_blocks(self.dataset, block_size)
+            self.blocks = groups
+            self.n_blocks = len(np.unique(groups))
+
         super().__init__(
             self.dataset, batch_size, shuffle, validation_split, num_workers,
             data_fraction=data_fraction if training else 1.0,
+            groups=groups,
+            strata=strata,
+            group_buffer=block_buffer,
+            group_select="tail" if val_split_mode == "tail" else "random",
+            valid_dataset=valid_dataset,
         )
+
+    @staticmethod
+    def _build_temporal_blocks(
+        dataset: datasets.ImageFolder, block_size: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Assign each frame to a contiguous temporal block within its class.
+
+        FLAME frames are named with a sequential index, so sorting a class's
+        filenames numerically recovers the order they were extracted from the
+        source video in. Frames are then cut into consecutive runs of
+        `block_size`, and those blocks become the indivisible unit of the
+        train/validation split.
+
+        Block ids are allocated per class and increase with time, so blocks
+        `g` and `g+1` really are temporal neighbours -- which is what
+        BaseDataLoader's `group_buffer` assumes when it discards the
+        neighbours of held-out blocks.
+
+        Args:
+            dataset (datasets.ImageFolder): Dataset whose `.samples` holds
+                (path, class_index) pairs.
+            block_size (int): Number of consecutive frames per block.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: (block id per sample, class label
+                per sample).
+        """
+        if block_size < 1:
+            raise ValueError(f"block_size must be >= 1, got {block_size}.")
+
+        samples = dataset.samples
+        strata = np.array([label for _, label in samples], dtype=np.int64)
+        groups = np.empty(len(samples), dtype=np.int64)
+
+        def sort_key(i: int) -> tuple[int, str]:
+            """Numeric-aware sort key -- 'frame_10' must follow 'frame_9'."""
+            stem = Path(samples[i][0]).stem
+            digits = re.findall(r"\d+", stem)
+            return (int(digits[-1]) if digits else 0, stem)
+
+        if not any(re.search(r"\d", Path(p).stem) for p, _ in samples[:64]):
+            warnings.warn(
+                "FLAME frame filenames contain no digits, so temporal order "
+                "cannot be recovered and blocks will follow alphabetical "
+                "order instead. Check that the split is still meaningful, or "
+                "supply groups explicitly.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+        next_block = 0
+        for label in np.unique(strata):
+            idx = np.flatnonzero(strata == label).tolist()
+            idx.sort(key=sort_key)
+            for position, i in enumerate(idx):
+                groups[i] = next_block + position // block_size
+            next_block += math.ceil(len(idx) / block_size)
+
+        return groups, strata
 
     def _build_train_transform(self, augmentation: str) -> transforms.Compose:
         """Build the training-time augmentation pipeline for a given level.

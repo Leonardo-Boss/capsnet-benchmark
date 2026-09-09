@@ -1,11 +1,16 @@
-"""Evaluate a trained model checkpoint on the CIFAR-10 test set under a
-single, explicitly toggled condition -- run once per condition you want to
-test, each producing its own CSV.
+"""Evaluate a trained model checkpoint on the test set under a single,
+explicitly toggled condition -- run once per condition you want to test,
+each producing its own CSV.
+
+Which dataset is evaluated is taken from the training config's
+`data_loader.type` (`Cifar10DataLoader` or `FlameDataLoader`), together
+with its `args` (`data_dir`, and `img_size` for FLAME), so the same
+command works for both kinds of run without extra flags.
 
 Examples:
-    python test.py -c config.yaml --model saved/.../model_best.pth --augmentation strong
-    python test.py -c config.yaml --model saved/.../model_best.pth --unseen-transformation
-    python test.py -c config.yaml --model saved/.../model_best.pth --augmentation standard --unseen-transformation
+    python test.py -c resnet18_cifar_10_strong_0_66_3.yaml --model saved/.../model_best.pth --augmentation strong
+    python test.py -c ecaps_flame_none_1_1.yaml --model saved/.../model_best.pth --unseen-transformation
+    python test.py -c ecaps_flame_none_1_1.yaml --model saved/.../model_best.pth --augmentation standard --unseen-transformation
     python test.py -c config.yaml --model saved/.../model_best.pth --unseen-transformation gaussian_noise occlusion
 """
 import argparse
@@ -18,34 +23,89 @@ from torchvision import datasets, transforms
 
 import model.model as module_arch
 from utils.config import Config
-from utils.data_loader import Cifar10DataLoader
+from utils.data_loader import Cifar10DataLoader, FlameDataLoader
 from utils.logger import get_logger
 from utils.tools import read_yaml
 from utils.unseen_transforms import UNSEEN_TRANSFORMS
 
 
-def build_eval_transform(augmentation: str, unseen_names: list[str] | None) -> transforms.Compose:
+# Data loader types this script knows how to build a matching test set for.
+SUPPORTED_LOADERS = ("Cifar10DataLoader", "FlameDataLoader")
+
+
+def get_loader_type(cfg: Config) -> str:
+    """Returns the data loader type named in the config, validated.
+
+    Raises:
+        ValueError: If the config names a loader this script can't evaluate.
+    """
+    loader_type = cfg["data_loader"]["type"]
+    if loader_type not in SUPPORTED_LOADERS:
+        raise ValueError(
+            f"Unsupported data_loader type '{loader_type}' in config. "
+            f"Expected one of {SUPPORTED_LOADERS}."
+        )
+    return loader_type
+
+
+def build_eval_transform(
+    loader_type: str,
+    augmentation: str,
+    unseen_names: list[str] | None,
+    img_size: int | None = None,
+) -> transforms.Compose:
     """Builds the image transform for this run's single condition.
 
+    Mirrors the training-time pipeline of the matching data loader, so the
+    'standard'/'strong' regimes here mean the same thing they did during
+    training (note FLAME deliberately never random-crops, to avoid cutting
+    the fire/smoke region out of the frame).
+
     Args:
+        loader_type: 'Cifar10DataLoader' or 'FlameDataLoader' -- taken from
+            the training config, decides normalization stats, resizing and
+            which augmentation ops apply.
         augmentation: 'none' | 'standard' | 'strong' -- training-style
             regime applied to test images. Not a robustness test on its
             own (the model trained under this family) -- combine with
             unseen_names for that.
         unseen_names: list of UNSEEN_TRANSFORMS keys to apply, in order,
             stacked on top of the augmentation regime. None/empty list
-            means no unseen corruption is applied.
+            means no unseen corruption is applied. Applied after ToTensor
+            and before Normalize, i.e. on tensors in [0, 1], as the
+            corruptions expect.
+        img_size: side length FLAME images are resized to. Required for
+            FlameDataLoader (must match the model's configured
+            `input_size`), ignored for CIFAR-10.
     """
     ops = []
 
-    if augmentation in ("standard", "strong"):
-        ops += [
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomRotation(15),
-        ]
-    if augmentation == "strong":
-        ops.append(transforms.RandAugment())
+    if loader_type == "Cifar10DataLoader":
+        mean, std = Cifar10DataLoader.CIFAR10_MEAN, Cifar10DataLoader.CIFAR10_STD
+
+        if augmentation in ("standard", "strong"):
+            ops += [
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(15),
+            ]
+        if augmentation == "strong":
+            ops.append(transforms.RandAugment())
+    else:  # FlameDataLoader
+        mean, std = FlameDataLoader.FLAME_MEAN, FlameDataLoader.FLAME_STD
+
+        if img_size is None:
+            raise ValueError("img_size is required for FlameDataLoader evaluation.")
+        ops.append(transforms.Resize((img_size, img_size)))
+
+        if augmentation in ("standard", "strong"):
+            ops += [
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(15),
+            ]
+        if augmentation == "strong":
+            ops.append(transforms.ColorJitter(brightness=0.3, contrast=0.3))
+            ops.append(transforms.RandAugment())
 
     ops.append(transforms.ToTensor())
 
@@ -55,10 +115,48 @@ def build_eval_transform(augmentation: str, unseen_names: list[str] | None) -> t
     if augmentation == "strong":
         ops.append(transforms.RandomErasing())
 
-    ops.append(
-        transforms.Normalize(Cifar10DataLoader.CIFAR10_MEAN, Cifar10DataLoader.CIFAR10_STD)
-    )
+    ops.append(transforms.Normalize(mean, std))
     return transforms.Compose(ops)
+
+
+def build_dataset(loader_type: str, data_dir: str, transform: transforms.Compose):
+    """Builds the held-out test set matching the configured data loader.
+
+    Args:
+        loader_type: 'Cifar10DataLoader' or 'FlameDataLoader'.
+        data_dir: Same `data_dir` convention as the training loader -- for
+            CIFAR-10 the parent of `cifar-10-batches-py`, for FLAME the
+            dataset root containing `Training/` and `Test/`.
+        transform: Image transform to apply, from `build_eval_transform`.
+
+    Returns:
+        A torchvision dataset yielding (image, int label) pairs.
+
+    Raises:
+        FileNotFoundError: If FLAME's `Test/` folder is missing.
+        ValueError: If FLAME's class folders aren't the expected pair.
+    """
+    if loader_type == "Cifar10DataLoader":
+        return datasets.CIFAR10(
+            data_dir, train=False, download=False, transform=transform
+        )
+
+    split_dir = Path(data_dir) / "Test"
+    if not split_dir.is_dir():
+        raise FileNotFoundError(
+            f"Expected a 'Test' folder under '{data_dir}' (with 'Fire'/"
+            f"'No_Fire' subfolders), but '{split_dir}' does not exist."
+        )
+
+    dataset = datasets.ImageFolder(str(split_dir), transform=transform)
+    if dataset.classes != ["Fire", "No_Fire"]:
+        # Same check FlameDataLoader makes: the one-hot/label index
+        # convention (0 = Fire, 1 = No_Fire) depends on this ordering.
+        raise ValueError(
+            f"Expected classes ['Fire', 'No_Fire'] under '{split_dir}', "
+            f"found {dataset.classes}."
+        )
+    return dataset
 
 
 def load_model(cfg: Config, checkpoint_path: str, device: torch.device) -> torch.nn.Module:
@@ -135,7 +233,8 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate a trained model on the test set")
     parser.add_argument(
         "-c", "--config", required=True,
-        help="path to the training config.yaml used to build the model architecture",
+        help="path to the training config.yaml used to build the model architecture "
+             "and to select the dataset (from data_loader.type)",
     )
     parser.add_argument("--model", required=True, help="path to a saved .pth checkpoint")
     parser.add_argument(
@@ -167,6 +266,10 @@ def main():
     )
     logger.info("Using device  : %s", device)
 
+    loader_type = get_loader_type(cfg)
+    loader_args = cfg["data_loader"]["args"]
+    logger.info("Dataset       : %s", loader_type)
+
     model = load_model(cfg, args.model, device)
     logger.info("Loaded checkpoint: %s", args.model)
 
@@ -180,9 +283,16 @@ def main():
         ", ".join(unseen_names) if unseen_enabled else "disabled",
     )
 
-    transform = build_eval_transform(args.augmentation, unseen_names)
-    data_dir = args.data_dir or cfg["data_loader"]["args"]["data_dir"]
-    dataset = datasets.CIFAR10(data_dir, train=False, download=False, transform=transform)
+    # img_size only matters for FLAME; mirrors FlameDataLoader's default
+    img_size = loader_args.get("img_size", 224)
+    if loader_type == "FlameDataLoader":
+        logger.info("Image size    : %s", img_size)
+
+    transform = build_eval_transform(
+        loader_type, args.augmentation, unseen_names, img_size=img_size
+    )
+    data_dir = args.data_dir or loader_args["data_dir"]
+    dataset = build_dataset(loader_type, data_dir, transform)
     loader = DataLoader(
         dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers
     )
