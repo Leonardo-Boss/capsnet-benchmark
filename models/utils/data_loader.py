@@ -1,6 +1,5 @@
-import math
-import re
-import warnings
+import inspect
+import logging
 from pathlib import Path
 from typing import Any, Callable
 
@@ -10,7 +9,7 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as Ft
 from PIL import Image
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 from torchvision import datasets, transforms
@@ -41,11 +40,6 @@ class BaseDataLoader(DataLoader):
         num_workers: int,
         collate_fn: Callable = default_collate,
         data_fraction: float = 1.0,
-        groups: np.ndarray | None = None,
-        strata: np.ndarray | None = None,
-        group_buffer: int = 1,
-        group_select: str = "random",
-        valid_dataset: Any | None = None,
     ):
         """Initialize loader class with the given dataset and parameters.
 
@@ -66,73 +60,12 @@ class BaseDataLoader(DataLoader):
                 fair. The subset is chosen randomly, not just the first N
                 samples. Defaults to 1.0
                 (use all training data).
-            groups (np.ndarray | None, optional): Per-sample integer group id,
-                length `len(dataset)`. When given, the train/validation split
-                is made at the *group* level -- every sample of a group lands
-                entirely in train or entirely in validation, never both. Use
-                this whenever samples are not independent (e.g. consecutive
-                frames extracted from the same video), because an iid index
-                shuffle would otherwise put near-duplicates on both sides of
-                the split and inflate validation scores. Group ids are
-                assumed to be contiguous and ordered along the correlation
-                axis (time), so id `g` and `g+1` are neighbours -- that is
-                what `group_buffer` relies on. `None` keeps the original iid
-                behaviour, which is correct for genuinely independent samples
-                (MNIST, CIFAR-10). Defaults to None.
-            strata (np.ndarray | None, optional): Per-sample class label used
-                to pick validation groups stratified by class, so the
-                validation split keeps the dataset's class balance instead of
-                whatever the randomly drawn groups happen to contain. Only
-                used when `groups` is given. Defaults to None (unstratified).
-            group_buffer (int, optional): Number of neighbouring groups on
-                each side of every held-out group to drop from *training*
-                (they are not added to validation either -- they are simply
-                discarded). This removes the residual leakage at block
-                boundaries, where the last frame of a training block and the
-                first frame of the adjacent validation block are consecutive
-                video frames. Only used when `groups` is given. Defaults to 1.
-            group_select (str, optional): How validation groups are chosen.
-                "random" draws groups at random (within each stratum), giving
-                validation coverage across the whole recording. "tail" takes
-                the last groups of each stratum as one contiguous held-out
-                segment -- a stricter, more pessimistic estimate, since the
-                validation data is maximally separated in time from training.
-                Only used when `groups` is given. Defaults to "random".
-            valid_dataset (Any | None, optional): Alternative dataset object
-                to draw validation samples from, indexed identically to
-                `dataset`. Use this to serve validation images through an
-                eval-time transform (resize + normalize only) while training
-                images still go through the augmentation pipeline, so that
-                `val_loss` -- which drives model selection -- is measured on
-                clean images and is comparable across augmentation regimes.
-                Defaults to None (validation reuses `dataset`).
         """
         assert 0 < data_fraction <= 1, "data_fraction must be in (0, 1]"
-        assert group_select in ("random", "tail"), (
-            f"Unknown group_select '{group_select}'. Expected 'random' or 'tail'."
-        )
         self.data_fraction = data_fraction
-
-        self.groups = None if groups is None else np.asarray(groups)
-        self.strata = None if strata is None else np.asarray(strata)
-        self.group_buffer = group_buffer
-        self.group_select = group_select
-        self.valid_dataset = valid_dataset
 
         self.shuffle = shuffle
         self.n_samples = len(dataset)
-
-        if self.groups is not None and len(self.groups) != self.n_samples:
-            raise ValueError(
-                f"groups has length {len(self.groups)} but the dataset has "
-                f"{self.n_samples} samples."
-            )
-        if self.valid_dataset is not None and len(self.valid_dataset) != self.n_samples:
-            raise ValueError(
-                "valid_dataset must be indexed identically to dataset "
-                f"({len(self.valid_dataset)} vs {self.n_samples} samples)."
-            )
-
         self.validation_split = validation_split
         self.train_sampler, self.valid_sampler = self._split_sampler(
             self.validation_split
@@ -162,6 +95,9 @@ class BaseDataLoader(DataLoader):
                 validation set, or None if no validation split and no
                 data_fraction subsetting is configured.
         """
+        idx_full = np.arange(self.n_samples)
+        np.random.shuffle(idx_full)
+
         if split == 0.0:
             len_valid = 0
         elif isinstance(split, int):
@@ -173,19 +109,14 @@ class BaseDataLoader(DataLoader):
         else:
             len_valid = int(self.n_samples * split)
 
-        if self.groups is None:
-            idx_full = np.arange(self.n_samples)
-            np.random.shuffle(idx_full)
-            valid_idx = idx_full[0:len_valid]
-            train_idx = np.delete(idx_full, np.arange(0, len_valid))
+        valid_idx = idx_full[0:len_valid]
+        train_idx = np.delete(idx_full, np.arange(0, len_valid))
 
-            # subsample the training portion only -- validation stays full and
-            # identical across different data_fraction runs
-            if self.data_fraction < 1.0:
-                n_keep = max(1, int(len(train_idx) * self.data_fraction))
-                train_idx = np.random.choice(train_idx, size=n_keep, replace=False)
-        else:
-            train_idx, valid_idx = self._grouped_split(len_valid)
+        # subsample the training portion only -- validation stays full and
+        # identical across different data_fraction runs
+        if self.data_fraction < 1.0:
+            n_keep = max(1, int(len(train_idx) * self.data_fraction))
+            train_idx = np.random.choice(train_idx, size=n_keep, replace=False)
 
         # a sampler is now needed whenever we're subsetting the training
         # data -- either from validation_split or data_fraction -- so
@@ -204,116 +135,12 @@ class BaseDataLoader(DataLoader):
 
         return train_sampler, valid_sampler
 
-    def _grouped_split(self, len_valid: int) -> tuple[np.ndarray, np.ndarray]:
-        """Split train/validation at the group level rather than per sample.
-
-        Whole groups are assigned to one side of the split, so correlated
-        samples (e.g. consecutive video frames) can never appear on both
-        sides. Groups adjacent to a held-out group are dropped entirely
-        (`group_buffer`) to remove boundary leakage.
-
-        Args:
-            len_valid (int): Target number of validation *samples*. The
-                realised size will land near, but rarely exactly on, this
-                number, since groups are indivisible.
-
-        Returns:
-            tuple[np.ndarray, np.ndarray]: (train_idx, valid_idx).
-        """
-        groups = self.groups
-        strata = (
-            self.strata
-            if self.strata is not None
-            else np.zeros(self.n_samples, dtype=np.int64)
-        )
-
-        valid_groups: list[int] = []
-        if len_valid > 0:
-            valid_fraction = len_valid / self.n_samples
-            for stratum in np.unique(strata):
-                in_stratum = strata == stratum
-                # unique() sorts, so group ids stay in temporal order here --
-                # "tail" depends on that, "random" does not care
-                s_groups = np.unique(groups[in_stratum])
-                # honour the fraction within each stratum so the validation
-                # split keeps the dataset's class balance
-                s_target = valid_fraction * in_stratum.sum()
-
-                order = (
-                    np.random.permutation(s_groups)
-                    if self.group_select == "random"
-                    else s_groups[::-1]  # last groups first == contiguous tail
-                )
-                taken = 0
-                for gid in order:
-                    if taken >= s_target:
-                        break
-                    valid_groups.append(int(gid))
-                    taken += int((groups == gid).sum())
-
-        valid_mask = np.isin(groups, valid_groups)
-
-        # drop the neighbours of every held-out group from training: the
-        # frames either side of a block boundary are consecutive in the
-        # source video, so keeping them would reintroduce exactly the
-        # leakage this split exists to prevent
-        blocked = set(valid_groups)
-        for gid in valid_groups:
-            for offset in range(1, self.group_buffer + 1):
-                blocked.add(gid - offset)
-                blocked.add(gid + offset)
-        train_mask = ~np.isin(groups, list(blocked))
-
-        train_idx = np.flatnonzero(train_mask)
-        valid_idx = np.flatnonzero(valid_mask)
-
-        # subsample training by group as well: pulling a random x% of
-        # *frames* from a 30fps recording barely reduces the information
-        # available (the discarded frames have near-identical neighbours),
-        # so a per-frame data_fraction would make the data-efficiency axis
-        # almost meaningless. Dropping whole blocks actually removes
-        # distinct content.
-        if self.data_fraction < 1.0 and len(train_idx) > 0:
-            train_idx = self._subsample_by_group(train_idx, strata)
-
-        np.random.shuffle(train_idx)
-        np.random.shuffle(valid_idx)
-        return train_idx, valid_idx
-
-    def _subsample_by_group(
-        self, train_idx: np.ndarray, strata: np.ndarray
-    ) -> np.ndarray:
-        """Keep a random `data_fraction` of whole training groups, per stratum."""
-        groups = self.groups
-        keep_idx: list[np.ndarray] = []
-
-        for stratum in np.unique(strata[train_idx]):
-            s_idx = train_idx[strata[train_idx] == stratum]
-            s_groups = np.unique(groups[s_idx])
-            target = max(1, int(round(len(s_idx) * self.data_fraction)))
-
-            taken, kept_groups = 0, []
-            for gid in np.random.permutation(s_groups):
-                if taken >= target:
-                    break
-                kept_groups.append(gid)
-                taken += int((groups[s_idx] == gid).sum())
-            keep_idx.append(s_idx[np.isin(groups[s_idx], kept_groups)])
-
-        return np.concatenate(keep_idx)
-
     def split_validation(self):
         """Get the validation set if configured."""
         if self.valid_sampler is None:
             return None
-
-        kwargs = dict(self.init_kwargs)
-        if self.valid_dataset is not None:
-            # same indices, eval-time transform -- val_loss is then measured
-            # on clean images and stays comparable across augmentation
-            # regimes, which matters because it is the model-selection metric
-            kwargs["dataset"] = self.valid_dataset
-        return DataLoader(sampler=self.valid_sampler, **kwargs)
+        else:
+            return DataLoader(sampler=self.valid_sampler, **self.init_kwargs)
 
 class MnistDataLoader(BaseDataLoader):
     """MNIST data loading class for Efficient CapsNet training.
@@ -681,10 +508,6 @@ class FlameDataLoader(BaseDataLoader):
         img_size: int = 224,
         augmentation: str = "standard",
         data_fraction: float = 1.0,
-        val_split_mode: str = "blocks",
-        block_size: int = 150,
-        block_buffer: int = 1,
-        clean_validation: bool = True,
     ):
         """Initializes the FlameDataLoader with the given parameters.
 
@@ -716,60 +539,8 @@ class FlameDataLoader(BaseDataLoader):
                 to "standard".
             data_fraction (float, optional): Fraction (0, 1] of the
                 training split to actually use. Ignored when
-                `training=False`. Defaults to 1.0. Under the "blocks"/"tail"
-                split modes this drops whole blocks rather than scattered
-                individual frames -- see BaseDataLoader.
-            val_split_mode (str, optional): How the validation split is
-                carved out of `Training/`.
-
-                FLAME's training frames are extracted from continuous UAV
-                video, so consecutive frames are near-duplicates. An iid
-                per-frame split therefore leaks: nearly every validation
-                frame has an almost identical twin in training, and the model
-                scores >90% within one epoch by recognising backgrounds it
-                has already memorised rather than by learning what fire looks
-                like. That inflated number then drives `min val_loss` model
-                selection, which picks the most background-overfit
-                checkpoint, and it collapses on the official `Test/` split
-                (a separate recording).
-
-                - "blocks" (default): frames are sorted into temporal order
-                  and cut into contiguous blocks of `block_size`; whole
-                  blocks are held out. Validation still covers the whole
-                  recording, but no validation frame has a near-duplicate in
-                  training.
-                - "tail": holds out one contiguous segment at the end of each
-                  class's frame sequence. Strictest and most pessimistic --
-                  closest in spirit to the train/test separation of the
-                  official split.
-                - "random": the original iid per-frame behaviour. Kept only
-                  so the leaky baseline can be reproduced deliberately; it
-                  should not be used for reported results.
-
-                Defaults to "blocks".
-            block_size (int, optional): Frames per temporal block. At ~30fps,
-                150 frames is roughly a 5-second segment. Smaller blocks give
-                more independent validation units but leave adjacent blocks
-                more similar; larger blocks are stricter but coarser.
-                Defaults to 150.
-            block_buffer (int, optional): Blocks either side of each held-out
-                block that are discarded from training, so that frames
-                straddling a block boundary don't leak. Defaults to 1.
-            clean_validation (bool, optional): Serve validation images
-                through the eval transform (resize + normalize only) instead
-                of the training augmentation pipeline, so `val_loss` is
-                measured on clean images. Defaults to True.
-
-        Raises:
-            ValueError: If `val_split_mode` or `augmentation` is unknown, or
-                if the on-disk class folders don't match the expected layout.
+                `training=False`. Defaults to 1.0.
         """
-        valid_modes = ("blocks", "tail", "random")
-        if val_split_mode not in valid_modes:
-            raise ValueError(
-                f"Unknown val_split_mode '{val_split_mode}'. "
-                f"Expected one of {valid_modes}."
-            )
         self.num_classes = 2
         self.img_size = img_size
 
@@ -788,16 +559,16 @@ class FlameDataLoader(BaseDataLoader):
                 f"but '{split_dir}' does not exist."
             )
 
-        eval_transform = transforms.Compose(
-            [
-                transforms.Resize((img_size, img_size)),
-                transforms.ToTensor(),
-                transforms.Normalize(self.FLAME_MEAN, self.FLAME_STD),
-            ]
-        )
-        image_transform = (
-            self._build_train_transform(augmentation) if training else eval_transform
-        )
+        if training:
+            image_transform = self._build_train_transform(augmentation)
+        else:
+            image_transform = transforms.Compose(
+                [
+                    transforms.Resize((img_size, img_size)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(self.FLAME_MEAN, self.FLAME_STD),
+                ]
+            )
 
         label_transform = transforms.Lambda(self.one_hot_encode)
 
@@ -806,17 +577,6 @@ class FlameDataLoader(BaseDataLoader):
             transform=image_transform,
             target_transform=label_transform,
         )
-
-        valid_dataset = None
-        if training and clean_validation and validation_split:
-            # second view of the same directory; ImageFolder sorts
-            # deterministically, so index i refers to the same file in both
-            valid_dataset = datasets.ImageFolder(
-                str(split_dir),
-                transform=eval_transform,
-                target_transform=label_transform,
-            )
-
         self.classes = self.dataset.classes
         if self.classes != ["Fire", "No_Fire"]:
             # ImageFolder sorts subfolder names alphabetically; this should
@@ -828,80 +588,10 @@ class FlameDataLoader(BaseDataLoader):
                 f"found {self.classes}."
             )
 
-        groups = strata = None
-        if training and val_split_mode != "random":
-            groups, strata = self._build_temporal_blocks(self.dataset, block_size)
-            self.blocks = groups
-            self.n_blocks = len(np.unique(groups))
-
         super().__init__(
             self.dataset, batch_size, shuffle, validation_split, num_workers,
             data_fraction=data_fraction if training else 1.0,
-            groups=groups,
-            strata=strata,
-            group_buffer=block_buffer,
-            group_select="tail" if val_split_mode == "tail" else "random",
-            valid_dataset=valid_dataset,
         )
-
-    @staticmethod
-    def _build_temporal_blocks(
-        dataset: datasets.ImageFolder, block_size: int
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Assign each frame to a contiguous temporal block within its class.
-
-        FLAME frames are named with a sequential index, so sorting a class's
-        filenames numerically recovers the order they were extracted from the
-        source video in. Frames are then cut into consecutive runs of
-        `block_size`, and those blocks become the indivisible unit of the
-        train/validation split.
-
-        Block ids are allocated per class and increase with time, so blocks
-        `g` and `g+1` really are temporal neighbours -- which is what
-        BaseDataLoader's `group_buffer` assumes when it discards the
-        neighbours of held-out blocks.
-
-        Args:
-            dataset (datasets.ImageFolder): Dataset whose `.samples` holds
-                (path, class_index) pairs.
-            block_size (int): Number of consecutive frames per block.
-
-        Returns:
-            tuple[np.ndarray, np.ndarray]: (block id per sample, class label
-                per sample).
-        """
-        if block_size < 1:
-            raise ValueError(f"block_size must be >= 1, got {block_size}.")
-
-        samples = dataset.samples
-        strata = np.array([label for _, label in samples], dtype=np.int64)
-        groups = np.empty(len(samples), dtype=np.int64)
-
-        def sort_key(i: int) -> tuple[int, str]:
-            """Numeric-aware sort key -- 'frame_10' must follow 'frame_9'."""
-            stem = Path(samples[i][0]).stem
-            digits = re.findall(r"\d+", stem)
-            return (int(digits[-1]) if digits else 0, stem)
-
-        if not any(re.search(r"\d", Path(p).stem) for p, _ in samples[:64]):
-            warnings.warn(
-                "FLAME frame filenames contain no digits, so temporal order "
-                "cannot be recovered and blocks will follow alphabetical "
-                "order instead. Check that the split is still meaningful, or "
-                "supply groups explicitly.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-
-        next_block = 0
-        for label in np.unique(strata):
-            idx = np.flatnonzero(strata == label).tolist()
-            idx.sort(key=sort_key)
-            for position, i in enumerate(idx):
-                groups[i] = next_block + position // block_size
-            next_block += math.ceil(len(idx) / block_size)
-
-        return groups, strata
 
     def _build_train_transform(self, augmentation: str) -> transforms.Compose:
         """Build the training-time augmentation pipeline for a given level.
@@ -927,6 +617,609 @@ class FlameDataLoader(BaseDataLoader):
         ops += [
             transforms.ToTensor(),
             transforms.Normalize(self.FLAME_MEAN, self.FLAME_STD),
+        ]
+
+        if augmentation == "strong":
+            ops.append(transforms.RandomErasing())  # operates on tensors
+
+        return transforms.Compose(ops)
+
+    def one_hot_encode(self, label: int) -> torch.Tensor:
+        """Transforms the given label into a one-hot encoded tensor."""
+        one_hot = torch.zeros(self.num_classes)
+        one_hot[label] = 1
+        return one_hot
+
+
+# ---------------------------------------------------------------------------
+# D-Fire: a YOLO *object-detection* dataset, consumed here as *classification*
+# ---------------------------------------------------------------------------
+
+_logger = logging.getLogger(__name__)
+
+IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+
+# Split-folder name aliases seen across the various D-Fire redistributions
+# (original OneDrive zips, the Kaggle mirror, Roboflow exports).
+_SPLIT_ALIASES = {
+    "train": ("train", "training"),
+    "val": ("val", "valid", "validation"),
+    "test": ("test", "testing"),
+}
+
+
+def _looks_like_image_dir(path: Path) -> bool:
+    """True if `path` is a directory holding at least one image file."""
+    if not path.is_dir():
+        return False
+    return any(p.suffix.lower() in IMG_EXTENSIONS for p in path.iterdir())
+
+
+def _resolve_split_dirs(root: Path, split: str, _depth: int = 0):
+    """Locate the (images_dir, labels_dir) pair for `split` under `root`.
+
+    Handles the three on-disk layouts D-Fire ships in, in this order:
+
+        1. <root>/train/images/*.jpg   + <root>/train/labels/*.txt
+        2. <root>/images/train/*.jpg   + <root>/labels/train/*.txt
+        3. <root>/train/*.jpg          + <root>/train/*.txt  (side by side)
+
+    If none match and `root` contains a single subdirectory (the usual
+    result of unzipping a Kaggle archive into a fresh folder), it
+    descends into it and retries, up to two levels deep.
+
+    Returns:
+        tuple[Path, Path] | None: (images_dir, labels_dir), or None if no
+            layout matched.
+    """
+    for name in _SPLIT_ALIASES[split]:
+        candidates = [
+            (root / name / "images", root / name / "labels"),
+            (root / "images" / name, root / "labels" / name),
+            (root / name, root / name),
+        ]
+        for images_dir, labels_dir in candidates:
+            if not _looks_like_image_dir(images_dir):
+                continue
+            if not labels_dir.is_dir():
+                # fall back to any plausible sibling annotation folder,
+                # otherwise assume the .txt files sit next to the images
+                for alt in ("labels", "annotations", "labels_txt"):
+                    sibling = images_dir.parent / alt
+                    if sibling.is_dir():
+                        labels_dir = sibling
+                        break
+                else:
+                    labels_dir = images_dir
+            return images_dir, labels_dir
+
+    if _depth < 2:
+        subdirs = [p for p in sorted(root.iterdir()) if p.is_dir()] if root.is_dir() else []
+        for sub in subdirs:
+            found = _resolve_split_dirs(sub, split, _depth + 1)
+            if found is not None:
+                return found
+
+    return None
+
+
+def _resolve_yolo_class_ids(root: Path, default_smoke: int = 0, default_fire: int = 1):
+    """Figure out which YOLO class id means 'smoke' and which means 'fire'.
+
+    D-Fire's own annotations use 0 = smoke, 1 = fire, but some
+    redistributions flip them, so a `data.yaml`/`data.yml` next to the
+    data (Ultralytics style, with a `names:` list or dict) is trusted
+    over the defaults when present.
+
+    Returns:
+        tuple[int, int]: (smoke_class_id, fire_class_id).
+    """
+    for pattern in ("data.yaml", "data.yml", "*/data.yaml", "*/data.yml"):
+        for cfg_path in sorted(root.glob(pattern)):
+            try:
+                import yaml  # local import: only needed on this path
+
+                with cfg_path.open("r", encoding="utf8") as f:
+                    names = (yaml.safe_load(f) or {}).get("names")
+            except Exception:  # unreadable/odd yaml -- just use the defaults
+                continue
+
+            if isinstance(names, dict):
+                pairs = [(int(k), str(v)) for k, v in names.items()]
+            elif isinstance(names, (list, tuple)):
+                pairs = list(enumerate(str(v) for v in names))
+            else:
+                continue
+
+            smoke_id = fire_id = None
+            for idx, name in pairs:
+                low = name.strip().lower()
+                if "smoke" in low:
+                    smoke_id = idx
+                elif "fire" in low or "flame" in low:
+                    fire_id = idx
+
+            if smoke_id is not None and fire_id is not None:
+                _logger.info(
+                    "Read class ids from %s: smoke=%d, fire=%d",
+                    cfg_path, smoke_id, fire_id,
+                )
+                return smoke_id, fire_id
+
+    return default_smoke, default_fire
+
+
+class YoloClassificationDataset(Dataset):
+    """Reads a YOLO detection dataset and serves it as image classification.
+
+    Every image gets exactly one label, derived purely from *which*
+    classes appear in its annotation file -- bounding-box coordinates are
+    parsed only far enough to read the leading class id, and are
+    otherwise discarded. An image with no annotation file, or with an
+    empty one, is treated as a true negative (YOLO's own convention for
+    background images), which is how D-Fire's ~9.8k "None" images are
+    picked up.
+
+    Label schemes (`label_scheme`):
+        "binary"     2 classes, index 0 = "Fire_or_Smoke" (at least one
+                     box of any class), 1 = "Nothing". The default, and
+                     the most balanced split of D-Fire (~11.7k positive
+                     vs ~9.8k negative).
+        "fire"       2 classes, 0 = "Fire" (>=1 fire box), 1 = "No_Fire".
+                     Smoke-only images count as negatives. Matches
+                     FlameDataLoader's task and its 0=Fire index order,
+                     but is class-imbalanced here (~5.8k vs ~15.7k).
+        "smoke"      2 classes, 0 = "Smoke", 1 = "No_Smoke".
+        "four_class" 4 classes ordered by severity: 0 = "Nothing",
+                     1 = "Smoke", 2 = "Fire", 3 = "Fire_And_Smoke" --
+                     the four categories D-Fire's own paper tabulates.
+
+    Attributes:
+        samples (list[tuple[Path, int]]): (image path, class index) pairs.
+        classes (list[str]): Class names in label-index order.
+        class_counts (dict[str, int]): Images per class, for sanity
+            checks and for computing loss weights if wanted.
+        n_missing_labels (int): Images with no annotation file at all
+            (counted as negatives).
+    """
+
+    LABEL_SCHEMES = ("binary", "fire", "smoke", "four_class")
+
+    SCHEME_CLASSES = {
+        "binary": ["Fire_or_Smoke", "Nothing"],
+        "fire": ["Fire", "No_Fire"],
+        "smoke": ["Smoke", "No_Smoke"],
+        "four_class": ["Nothing", "Smoke", "Fire", "Fire_And_Smoke"],
+    }
+
+    def __init__(
+        self,
+        images_dir: str | Path,
+        labels_dir: str | Path,
+        label_scheme: str = "binary",
+        smoke_class_id: int = 0,
+        fire_class_id: int = 1,
+        transform: Callable | None = None,
+        target_transform: Callable | None = None,
+    ):
+        """Indexes the split and derives one class label per image.
+
+        Args:
+            images_dir (str | Path): Directory of image files.
+            labels_dir (str | Path): Directory of YOLO `.txt` annotation
+                files, matched to images by stem. May be the same as
+                `images_dir` for side-by-side layouts.
+            label_scheme (str, optional): One of `LABEL_SCHEMES`.
+                Defaults to "binary".
+            smoke_class_id (int, optional): YOLO class id meaning smoke.
+                Defaults to 0 (D-Fire's convention).
+            fire_class_id (int, optional): YOLO class id meaning fire.
+                Defaults to 1.
+            transform (Callable, optional): Image transform, applied to a
+                PIL image. Defaults to None.
+            target_transform (Callable, optional): Label transform, e.g.
+                one-hot encoding. Defaults to None.
+        """
+        label_scheme = label_scheme.lower()
+        if label_scheme not in self.LABEL_SCHEMES:
+            raise ValueError(
+                f"Unknown label_scheme '{label_scheme}'. "
+                f"Expected one of {self.LABEL_SCHEMES}."
+            )
+
+        self.images_dir = Path(images_dir)
+        self.labels_dir = Path(labels_dir)
+        self.label_scheme = label_scheme
+        self.smoke_class_id = smoke_class_id
+        self.fire_class_id = fire_class_id
+        self.transform = transform
+        self.target_transform = target_transform
+
+        self.classes = list(self.SCHEME_CLASSES[label_scheme])
+        self.num_classes = len(self.classes)
+
+        image_paths = sorted(
+            p for p in self.images_dir.iterdir()
+            if p.suffix.lower() in IMG_EXTENSIONS
+        )
+        if not image_paths:
+            raise FileNotFoundError(f"No image files found under '{self.images_dir}'.")
+
+        self.samples: list[tuple[Path, int]] = []
+        self.n_missing_labels = 0
+
+        for img_path in image_paths:
+            label_path = self.labels_dir / (img_path.stem + ".txt")
+            if label_path.is_file():
+                present = self._read_class_ids(label_path)
+            else:
+                present = set()
+                self.n_missing_labels += 1
+            self.samples.append((img_path, self._to_class_index(present)))
+
+        self.class_counts = {name: 0 for name in self.classes}
+        for _, idx in self.samples:
+            self.class_counts[self.classes[idx]] += 1
+
+        if self.n_missing_labels:
+            frac = self.n_missing_labels / len(self.samples)
+            msg = (
+                "%d/%d images in %s have no matching .txt in %s and were "
+                "labelled as negatives."
+            )
+            args = (self.n_missing_labels, len(self.samples),
+                    self.images_dir, self.labels_dir)
+            # a handful of missing files is normal (background images are
+            # sometimes shipped without empty .txt stubs); most of them
+            # missing almost always means labels_dir is pointing somewhere
+            # wrong, which would silently train the model on garbage
+            if frac > 0.5:
+                _logger.warning(msg + " That is over half the split -- check "
+                                "that the labels directory is correct.", *args)
+            else:
+                _logger.info(msg, *args)
+
+        _logger.info(
+            "D-Fire split %s: %d images, scheme=%s, counts=%s",
+            self.images_dir, len(self.samples), label_scheme, self.class_counts,
+        )
+
+    @staticmethod
+    def _read_class_ids(label_path: Path) -> set[int]:
+        """Returns the set of YOLO class ids annotated in one label file."""
+        present: set[int] = set()
+        with label_path.open("r", encoding="utf8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                token = line.split()[0]
+                try:
+                    present.add(int(float(token)))
+                except ValueError:
+                    _logger.warning(
+                        "Skipping unparseable line in %s: %r", label_path, line
+                    )
+        return present
+
+    def _to_class_index(self, present: set[int]) -> int:
+        """Maps the class ids found in an annotation file to one label."""
+        has_fire = self.fire_class_id in present
+        has_smoke = self.smoke_class_id in present
+
+        if self.label_scheme == "binary":
+            return 0 if present else 1
+        if self.label_scheme == "fire":
+            return 0 if has_fire else 1
+        if self.label_scheme == "smoke":
+            return 0 if has_smoke else 1
+        # four_class
+        if has_fire and has_smoke:
+            return 3
+        if has_fire:
+            return 2
+        if has_smoke:
+            return 1
+        return 0
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index: int):
+        img_path, target = self.samples[index]
+        image = Image.open(img_path).convert("RGB")
+
+        if self.transform is not None:
+            image = self.transform(image)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return image, target
+
+
+class DFireDataLoader(BaseDataLoader):
+    """D-Fire data loader: a detection dataset repurposed for classification.
+
+    D-Fire (Venancio et al.) is 21,527 fire/smoke surveillance and
+    wildfire images annotated with YOLO bounding boxes -- 1,164 fire
+    only, 5,867 smoke only, 4,658 both, and 9,838 with nothing. This
+    loader throws the box geometry away and keeps only *which* classes
+    each image contains, turning it into a whole-image classification
+    task that plugs into the same trainer, margin loss and one-hot
+    target convention as MnistDataLoader / Cifar10DataLoader /
+    FlameDataLoader.
+
+    `data_dir` is the dataset root; the split folders are auto-detected,
+    so all three layouts D-Fire is distributed in work unchanged:
+
+        <data_dir>/train/images/*.jpg + <data_dir>/train/labels/*.txt
+        <data_dir>/images/train/*.jpg + <data_dir>/labels/train/*.txt
+        <data_dir>/train/*.jpg        + <data_dir>/train/*.txt
+
+    plus `val`/`valid` and `test` under the same shape, and one level of
+    nesting (an extra wrapper folder from unzipping the Kaggle archive).
+
+    `training=True` loads the train split with augmentation; validation
+    is carved out of it via `validation_split`, exactly like the other
+    loaders here, so `data_fraction` sweeps stay comparable. Set
+    `use_official_val=True` to use the dataset's own `val`/`valid`
+    folder as the validation set instead (unaugmented, and unaffected by
+    `data_fraction`). `training=False` loads the test split with resize
+    + normalize only.
+
+    See `YoloClassificationDataset` for the `label_scheme` options; note
+    that "binary" gives 2 classes with index 0 = positive, matching
+    FlameDataLoader's 0 = Fire index order, so a 2-class `arch.args`
+    config carries over from FLAME with no changes.
+
+    Attributes:
+        num_classes (int): Number of classes implied by `label_scheme`.
+        classes (list[str]): Class names in one-hot index order.
+        class_counts (dict[str, int]): Images per class in the loaded split.
+        img_size (int): Side length images are resized to.
+        dataset (Dataset): The underlying YoloClassificationDataset.
+    """
+
+    # Standard ImageNet stats -- same choice as FlameDataLoader, these
+    # are real photographic RGB images.
+    DFIRE_MEAN = (0.485, 0.456, 0.406)
+    DFIRE_STD = (0.229, 0.224, 0.225)
+
+    AUGMENTATION_LEVELS = ("none", "standard", "strong")
+
+    def __init__(
+        self,
+        data_dir: str,
+        batch_size: int,
+        shuffle: bool = True,
+        validation_split: int | float = 0.0,
+        num_workers: int = 1,
+        training: bool = True,
+        img_size: int = 224,
+        augmentation: str = "standard",
+        data_fraction: float = 1.0,
+        label_scheme: str = "binary",
+        use_official_val: bool = False,
+        clean_validation: bool = True,
+        val_split_mode: str | None = None,
+        block_size: int | None = None,
+        block_buffer: int | None = None,
+    ):
+        """Initializes the DFireDataLoader with the given parameters.
+
+        Args:
+            data_dir (str): Path to the D-Fire dataset root.
+            batch_size (int): Number of samples per batch.
+            shuffle (bool, optional): Whether to shuffle every epoch.
+                Defaults to True.
+            validation_split (int | float, optional): Fraction (float) or
+                count (int) of the train split held out for validation.
+                Only meaningful when `training=True`, and ignored when
+                `use_official_val=True`. Defaults to 0.0.
+            num_workers (int, optional): Subprocesses for data loading.
+                Defaults to 1.
+            training (bool, optional): Load the train split (augmented)
+                or the test split (clean). Defaults to True.
+            img_size (int, optional): Side length images are resized to.
+                Must match the model's configured `input_size`. D-Fire
+                images vary in resolution, so unlike FLAME this resize
+                always happens. Defaults to 224.
+            augmentation (str, optional): "none", "standard" or "strong".
+                Ignored when `training=False`. Defaults to "standard".
+            data_fraction (float, optional): Fraction (0, 1] of the train
+                split to use. Ignored when `training=False`. Defaults to 1.0.
+            label_scheme (str, optional): How box classes collapse to one
+                label per image -- "binary", "fire", "smoke" or
+                "four_class". Defaults to "binary".
+            use_official_val (bool, optional): Use the dataset's own
+                `val`/`valid` folder for validation instead of carving it
+                out of train. Defaults to False.
+            clean_validation (bool, optional): Evaluate the carved-out
+                validation samples with the resize+normalize transform
+                instead of the training augmentation, so `val_loss` is
+                measured on clean images and stays comparable across
+                augmentation regimes. Defaults to True.
+            val_split_mode (str, optional): Forwarded to BaseDataLoader
+                if that class supports it (see note below). Defaults to
+                None (leave BaseDataLoader's own default alone).
+            block_size (int, optional): Forwarded to BaseDataLoader if
+                supported. Defaults to None.
+            block_buffer (int, optional): Forwarded to BaseDataLoader if
+                supported. Defaults to None.
+
+        Note:
+            `val_split_mode`/`block_size`/`block_buffer` exist so a
+            D-Fire config can carry the same keys as a FLAME one. They
+            are passed through to `BaseDataLoader` only if its signature
+            accepts them; otherwise they are dropped with a warning
+            rather than raising, since block-style splitting is a
+            countermeasure against consecutive-video-frame leakage and
+            D-Fire is a still-image dataset that mostly doesn't have it.
+        """
+        augmentation = augmentation.lower()
+        if augmentation not in self.AUGMENTATION_LEVELS:
+            raise ValueError(
+                f"Unknown augmentation level '{augmentation}'. "
+                f"Expected one of {self.AUGMENTATION_LEVELS}."
+            )
+
+        self.img_size = img_size
+        self.label_scheme = label_scheme.lower()
+        self.classes = list(
+            YoloClassificationDataset.SCHEME_CLASSES.get(self.label_scheme, [])
+        )
+        if not self.classes:
+            raise ValueError(
+                f"Unknown label_scheme '{label_scheme}'. Expected one of "
+                f"{YoloClassificationDataset.LABEL_SCHEMES}."
+            )
+        self.num_classes = len(self.classes)
+
+        root = Path(data_dir)
+        if not root.is_dir():
+            raise FileNotFoundError(f"D-Fire root '{data_dir}' does not exist.")
+
+        self.smoke_class_id, self.fire_class_id = _resolve_yolo_class_ids(root)
+
+        split = "train" if training else "test"
+        dirs = _resolve_split_dirs(root, split)
+        if dirs is None:
+            raise FileNotFoundError(
+                f"Could not find a '{split}' split under '{data_dir}'. Expected "
+                f"one of <root>/{split}/images, <root>/images/{split}, or "
+                f"<root>/{split} containing image files."
+            )
+        images_dir, labels_dir = dirs
+
+        if training:
+            image_transform = self._build_train_transform(augmentation)
+        else:
+            image_transform = self._build_eval_transform()
+
+        label_transform = transforms.Lambda(self.one_hot_encode)
+
+        self.dataset = YoloClassificationDataset(
+            images_dir=images_dir,
+            labels_dir=labels_dir,
+            label_scheme=self.label_scheme,
+            smoke_class_id=self.smoke_class_id,
+            fire_class_id=self.fire_class_id,
+            transform=image_transform,
+            target_transform=label_transform,
+        )
+        self.class_counts = self.dataset.class_counts
+
+        # optional: the dataset's own held-out val folder, used instead of
+        # slicing the train split
+        self._official_val_dataset = None
+        if training and use_official_val:
+            val_dirs = _resolve_split_dirs(root, "val")
+            if val_dirs is None:
+                raise FileNotFoundError(
+                    f"use_official_val=True but no val/valid split was found "
+                    f"under '{data_dir}'."
+                )
+            val_images_dir, val_labels_dir = val_dirs
+            self._official_val_dataset = YoloClassificationDataset(
+                images_dir=val_images_dir,
+                labels_dir=val_labels_dir,
+                label_scheme=self.label_scheme,
+                smoke_class_id=self.smoke_class_id,
+                fire_class_id=self.fire_class_id,
+                transform=self._build_eval_transform(),
+                target_transform=label_transform,
+            )
+            validation_split = 0.0  # the train split stays whole
+
+        # a second view of the *same* train split, unaugmented -- the
+        # validation sampler indexes into this one when clean_validation
+        # is on, so val_loss isn't measured through RandAugment
+        self._clean_dataset = None
+        if training and clean_validation and self._official_val_dataset is None:
+            self._clean_dataset = YoloClassificationDataset(
+                images_dir=images_dir,
+                labels_dir=labels_dir,
+                label_scheme=self.label_scheme,
+                smoke_class_id=self.smoke_class_id,
+                fire_class_id=self.fire_class_id,
+                transform=self._build_eval_transform(),
+                target_transform=label_transform,
+            )
+
+        # keys that only exist in some versions of BaseDataLoader -- pass
+        # them on where they're understood, drop them loudly where they
+        # aren't, so one config schema works against either version
+        extra = {
+            "val_split_mode": val_split_mode,
+            "block_size": block_size,
+            "block_buffer": block_buffer,
+        }
+        accepted = inspect.signature(BaseDataLoader.__init__).parameters
+        forwarded = {k: v for k, v in extra.items() if v is not None and k in accepted}
+        dropped = [k for k, v in extra.items() if v is not None and k not in accepted]
+        if dropped:
+            _logger.warning(
+                "BaseDataLoader does not accept %s -- ignoring, the validation "
+                "split will be a plain random subset of the train split.",
+                ", ".join(dropped),
+            )
+
+        super().__init__(
+            self.dataset, batch_size, shuffle, validation_split, num_workers,
+            data_fraction=data_fraction if training else 1.0,
+            **forwarded,
+        )
+
+    def split_validation(self):
+        """Get the validation set, preferring the dataset's own val split."""
+        if self._official_val_dataset is not None:
+            kwargs = dict(self.init_kwargs)
+            kwargs["dataset"] = self._official_val_dataset
+            kwargs["shuffle"] = False
+            return DataLoader(**kwargs)
+
+        if self.valid_sampler is not None and self._clean_dataset is not None:
+            kwargs = dict(self.init_kwargs)
+            kwargs["dataset"] = self._clean_dataset  # same indices, no augmentation
+            return DataLoader(sampler=self.valid_sampler, **kwargs)
+
+        return super().split_validation()
+
+    def _build_eval_transform(self) -> transforms.Compose:
+        """Resize + normalize only -- no augmentation."""
+        return transforms.Compose(
+            [
+                transforms.Resize((self.img_size, self.img_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(self.DFIRE_MEAN, self.DFIRE_STD),
+            ]
+        )
+
+    def _build_train_transform(self, augmentation: str) -> transforms.Compose:
+        """Build the training-time augmentation pipeline for a given level.
+
+        Mirrors FlameDataLoader exactly so the two fire datasets stay
+        directly comparable, including its deliberate use of a plain
+        `Resize` rather than `RandomResizedCrop`: a random crop could
+        remove the only fire/smoke region in the frame and silently
+        mislabel the sample, which matters even more here, since D-Fire's
+        boxes are often small.
+        """
+        ops = [transforms.Resize((self.img_size, self.img_size))]
+
+        if augmentation in ("standard", "strong"):
+            ops += [
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(15),  # +/- 15 degrees
+            ]
+
+        if augmentation == "strong":
+            ops.append(transforms.ColorJitter(brightness=0.3, contrast=0.3))
+            ops.append(transforms.RandAugment())  # operates on PIL images
+
+        ops += [
+            transforms.ToTensor(),
+            transforms.Normalize(self.DFIRE_MEAN, self.DFIRE_STD),
         ]
 
         if augmentation == "strong":

@@ -1,16 +1,14 @@
-"""Evaluate a trained model checkpoint on the test set under a single,
+"""Evaluate a trained model checkpoint on a test set under a single,
 explicitly toggled condition -- run once per condition you want to test,
 each producing its own CSV.
 
-Which dataset is evaluated is taken from the training config's
-`data_loader.type` (`Cifar10DataLoader` or `FlameDataLoader`), together
-with its `args` (`data_dir`, and `img_size` for FLAME), so the same
-command works for both kinds of run without extra flags.
+The dataset is inferred from the `data_loader.type` field of the config
+passed with -c, so the same command works for CIFAR-10, FLAME and D-Fire.
 
 Examples:
-    python test.py -c resnet18_cifar_10_strong_0_66_3.yaml --model saved/.../model_best.pth --augmentation strong
-    python test.py -c ecaps_flame_none_1_1.yaml --model saved/.../model_best.pth --unseen-transformation
-    python test.py -c ecaps_flame_none_1_1.yaml --model saved/.../model_best.pth --augmentation standard --unseen-transformation
+    python test.py -c config.yaml --model saved/.../model_best.pth --augmentation strong
+    python test.py -c config.yaml --model saved/.../model_best.pth --unseen-transformation
+    python test.py -c config.yaml --model saved/.../model_best.pth --augmentation standard --unseen-transformation
     python test.py -c config.yaml --model saved/.../model_best.pth --unseen-transformation gaussian_noise occlusion
 """
 import argparse
@@ -23,89 +21,85 @@ from torchvision import datasets, transforms
 
 import model.model as module_arch
 from utils.config import Config
-from utils.data_loader import Cifar10DataLoader, FlameDataLoader
+from utils.data_loader import (
+    Cifar10DataLoader,
+    DFireDataLoader,
+    FlameDataLoader,
+    YoloClassificationDataset,
+    _resolve_split_dirs,
+    _resolve_yolo_class_ids,
+)
 from utils.logger import get_logger
 from utils.tools import read_yaml
 from utils.unseen_transforms import UNSEEN_TRANSFORMS
 
 
-# Data loader types this script knows how to build a matching test set for.
-SUPPORTED_LOADERS = ("Cifar10DataLoader", "FlameDataLoader")
-
-
-def get_loader_type(cfg: Config) -> str:
-    """Returns the data loader type named in the config, validated.
-
-    Raises:
-        ValueError: If the config names a loader this script can't evaluate.
-    """
-    loader_type = cfg["data_loader"]["type"]
-    if loader_type not in SUPPORTED_LOADERS:
-        raise ValueError(
-            f"Unsupported data_loader type '{loader_type}' in config. "
-            f"Expected one of {SUPPORTED_LOADERS}."
-        )
-    return loader_type
+# Maps the loader class named in the config to everything the eval path
+# needs to know about that dataset: its normalization stats, and whether
+# images have to be resized (CIFAR-10 is natively 32x32 and is crop-
+# augmented instead; FLAME and D-Fire are resized to the configured
+# img_size, exactly as their loaders do at training time).
+DATASET_SPECS = {
+    "Cifar10DataLoader": {
+        "kind": "cifar10",
+        "mean": Cifar10DataLoader.CIFAR10_MEAN,
+        "std": Cifar10DataLoader.CIFAR10_STD,
+        "resize": False,
+    },
+    "FlameDataLoader": {
+        "kind": "flame",
+        "mean": FlameDataLoader.FLAME_MEAN,
+        "std": FlameDataLoader.FLAME_STD,
+        "resize": True,
+    },
+    "DFireDataLoader": {
+        "kind": "dfire",
+        "mean": DFireDataLoader.DFIRE_MEAN,
+        "std": DFireDataLoader.DFIRE_STD,
+        "resize": True,
+    },
+}
 
 
 def build_eval_transform(
-    loader_type: str,
+    spec: dict,
     augmentation: str,
     unseen_names: list[str] | None,
-    img_size: int | None = None,
+    img_size: int,
 ) -> transforms.Compose:
     """Builds the image transform for this run's single condition.
 
-    Mirrors the training-time pipeline of the matching data loader, so the
-    'standard'/'strong' regimes here mean the same thing they did during
-    training (note FLAME deliberately never random-crops, to avoid cutting
-    the fire/smoke region out of the frame).
-
     Args:
-        loader_type: 'Cifar10DataLoader' or 'FlameDataLoader' -- taken from
-            the training config, decides normalization stats, resizing and
-            which augmentation ops apply.
+        spec: the DATASET_SPECS entry for the dataset being evaluated.
         augmentation: 'none' | 'standard' | 'strong' -- training-style
             regime applied to test images. Not a robustness test on its
             own (the model trained under this family) -- combine with
             unseen_names for that.
         unseen_names: list of UNSEEN_TRANSFORMS keys to apply, in order,
             stacked on top of the augmentation regime. None/empty list
-            means no unseen corruption is applied. Applied after ToTensor
-            and before Normalize, i.e. on tensors in [0, 1], as the
-            corruptions expect.
-        img_size: side length FLAME images are resized to. Required for
-            FlameDataLoader (must match the model's configured
-            `input_size`), ignored for CIFAR-10.
+            means no unseen corruption is applied.
+        img_size: side length images are resized to, for the datasets
+            that need resizing. Ignored for CIFAR-10.
     """
     ops = []
 
-    if loader_type == "Cifar10DataLoader":
-        mean, std = Cifar10DataLoader.CIFAR10_MEAN, Cifar10DataLoader.CIFAR10_STD
-
-        if augmentation in ("standard", "strong"):
-            ops += [
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(15),
-            ]
-        if augmentation == "strong":
-            ops.append(transforms.RandAugment())
-    else:  # FlameDataLoader
-        mean, std = FlameDataLoader.FLAME_MEAN, FlameDataLoader.FLAME_STD
-
-        if img_size is None:
-            raise ValueError("img_size is required for FlameDataLoader evaluation.")
+    if spec["resize"]:
+        # always first, and always applied: unlike CIFAR-10 these images
+        # are not natively the model's input size, and D-Fire's are not
+        # even all the same size as each other
         ops.append(transforms.Resize((img_size, img_size)))
 
-        if augmentation in ("standard", "strong"):
-            ops += [
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(15),
-            ]
-        if augmentation == "strong":
+    if augmentation in ("standard", "strong"):
+        if not spec["resize"]:
+            ops.append(transforms.RandomCrop(32, padding=4))
+        ops += [
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(15),
+        ]
+    if augmentation == "strong":
+        if spec["resize"]:
             ops.append(transforms.ColorJitter(brightness=0.3, contrast=0.3))
-            ops.append(transforms.RandAugment())
+        ops.append(transforms.RandAugment())
 
     ops.append(transforms.ToTensor())
 
@@ -115,48 +109,44 @@ def build_eval_transform(
     if augmentation == "strong":
         ops.append(transforms.RandomErasing())
 
-    ops.append(transforms.Normalize(mean, std))
+    ops.append(transforms.Normalize(spec["mean"], spec["std"]))
     return transforms.Compose(ops)
 
 
-def build_dataset(loader_type: str, data_dir: str, transform: transforms.Compose):
-    """Builds the held-out test set matching the configured data loader.
+def build_test_dataset(spec: dict, loader_args: dict, data_dir: str, transform):
+    """Builds the held-out test split for the dataset named in the config.
 
-    Args:
-        loader_type: 'Cifar10DataLoader' or 'FlameDataLoader'.
-        data_dir: Same `data_dir` convention as the training loader -- for
-            CIFAR-10 the parent of `cifar-10-batches-py`, for FLAME the
-            dataset root containing `Training/` and `Test/`.
-        transform: Image transform to apply, from `build_eval_transform`.
-
-    Returns:
-        A torchvision dataset yielding (image, int label) pairs.
-
-    Raises:
-        FileNotFoundError: If FLAME's `Test/` folder is missing.
-        ValueError: If FLAME's class folders aren't the expected pair.
+    Labels are returned as plain ints (not one-hot) -- `evaluate` compares
+    them against argmaxed predictions directly.
     """
-    if loader_type == "Cifar10DataLoader":
-        return datasets.CIFAR10(
-            data_dir, train=False, download=False, transform=transform
+    kind = spec["kind"]
+
+    if kind == "cifar10":
+        return datasets.CIFAR10(data_dir, train=False, download=False, transform=transform)
+
+    if kind == "flame":
+        split_dir = Path(data_dir) / "Test"
+        if not split_dir.is_dir():
+            raise FileNotFoundError(f"Expected a 'Test' folder under '{data_dir}'.")
+        return datasets.ImageFolder(str(split_dir), transform=transform)
+
+    if kind == "dfire":
+        root = Path(data_dir)
+        dirs = _resolve_split_dirs(root, "test")
+        if dirs is None:
+            raise FileNotFoundError(f"Could not find a 'test' split under '{data_dir}'.")
+        images_dir, labels_dir = dirs
+        smoke_id, fire_id = _resolve_yolo_class_ids(root)
+        return YoloClassificationDataset(
+            images_dir=images_dir,
+            labels_dir=labels_dir,
+            label_scheme=loader_args.get("label_scheme", "binary"),
+            smoke_class_id=smoke_id,
+            fire_class_id=fire_id,
+            transform=transform,
         )
 
-    split_dir = Path(data_dir) / "Test"
-    if not split_dir.is_dir():
-        raise FileNotFoundError(
-            f"Expected a 'Test' folder under '{data_dir}' (with 'Fire'/"
-            f"'No_Fire' subfolders), but '{split_dir}' does not exist."
-        )
-
-    dataset = datasets.ImageFolder(str(split_dir), transform=transform)
-    if dataset.classes != ["Fire", "No_Fire"]:
-        # Same check FlameDataLoader makes: the one-hot/label index
-        # convention (0 = Fire, 1 = No_Fire) depends on this ordering.
-        raise ValueError(
-            f"Expected classes ['Fire', 'No_Fire'] under '{split_dir}', "
-            f"found {dataset.classes}."
-        )
-    return dataset
+    raise ValueError(f"Unsupported dataset kind '{kind}'.")
 
 
 def load_model(cfg: Config, checkpoint_path: str, device: torch.device) -> torch.nn.Module:
@@ -233,8 +223,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate a trained model on the test set")
     parser.add_argument(
         "-c", "--config", required=True,
-        help="path to the training config.yaml used to build the model architecture "
-             "and to select the dataset (from data_loader.type)",
+        help="path to the training config.yaml used to build the model architecture",
     )
     parser.add_argument("--model", required=True, help="path to a saved .pth checkpoint")
     parser.add_argument(
@@ -266,10 +255,6 @@ def main():
     )
     logger.info("Using device  : %s", device)
 
-    loader_type = get_loader_type(cfg)
-    loader_args = cfg["data_loader"]["args"]
-    logger.info("Dataset       : %s", loader_type)
-
     model = load_model(cfg, args.model, device)
     logger.info("Loaded checkpoint: %s", args.model)
 
@@ -283,16 +268,20 @@ def main():
         ", ".join(unseen_names) if unseen_enabled else "disabled",
     )
 
-    # img_size only matters for FLAME; mirrors FlameDataLoader's default
-    img_size = loader_args.get("img_size", 224)
-    if loader_type == "FlameDataLoader":
-        logger.info("Image size    : %s", img_size)
+    loader_type = cfg["data_loader"]["type"]
+    if loader_type not in DATASET_SPECS:
+        raise ValueError(
+            f"data_loader.type '{loader_type}' has no eval spec. "
+            f"Known: {sorted(DATASET_SPECS)}."
+        )
+    spec = DATASET_SPECS[loader_type]
+    loader_args = cfg["data_loader"]["args"]
+    logger.info("Dataset       : %s", loader_type)
 
-    transform = build_eval_transform(
-        loader_type, args.augmentation, unseen_names, img_size=img_size
-    )
+    img_size = loader_args.get("img_size") or cfg["arch"]["args"]["input_size"][-1]
+    transform = build_eval_transform(spec, args.augmentation, unseen_names, img_size)
     data_dir = args.data_dir or loader_args["data_dir"]
-    dataset = build_dataset(loader_type, data_dir, transform)
+    dataset = build_test_dataset(spec, loader_args, data_dir, transform)
     loader = DataLoader(
         dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers
     )
