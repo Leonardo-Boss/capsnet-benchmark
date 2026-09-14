@@ -1,0 +1,113 @@
+% =====================================================================
+%  REVISÃO DA LITERATURA
+%  Importe com \input{revisao-literatura} a partir do seu .tex principal.
+%
+%  Requer no preâmbulo:
+%    \usepackage[utf8]{inputenc}   % se não estiver usando LuaLaTeX/XeLaTeX
+%    \usepackage[brazil]{babel}
+%
+%  Bibliografia: as chaves \cite{} abaixo correspondem ao arquivo
+%  referencias.bib fornecido junto com este capítulo.
+%
+%  Se a sua classe de documento for `article`, troque \chapter -> \section
+%  e rebaixe os demais níveis.
+% =====================================================================
+
+\chapter{Revisão da Literatura}
+\label{ch:revisao}
+
+% ---------------------------------------------------------------------
+\section{Redes de cápsulas}
+\label{sec:revisao:capsulas}
+
+Sabour, Frosst e Hinton propuseram as cápsulas em 2017~\cite{sabour2017dynamic}.
+Cada cápsula emite um vetor: a norma indica a presença da entidade, a orientação
+indica sua pose. As cápsulas de uma camada se acoplam às da seguinte por
+roteamento por acordo, um processo iterativo, depois reformulado sobre cápsulas
+matriciais~\cite{hinton2018matrix}.
+
+Da pose explícita viriam duas vantagens. A primeira é robustez a pontos de vista
+não vistos. A segunda é eficiência amostral: a rede não precisaria memorizar cada
+transformação por augmentação ou por filtros redundantes.
+
+Trabalhos posteriores baratearam a formulação. O DeepCaps aprofundou a
+rede~\cite{rajasegaran2019deepcaps}; o Efficient-CapsNet chegou a 160 mil
+parâmetros e trocou o roteamento iterativo por uma única passagem com
+autoatenção~\cite{mazzia2021efficient}. É o Efficient-CapsNet que este trabalho
+usa.
+
+% ---------------------------------------------------------------------
+\section{Uma controvérsia em aberto}
+\label{sec:revisao:controversia}
+
+\paragraph{Equivariância.}
+O resultado favorável mais direto está em smallNORB~\cite{hinton2018matrix}.
+Hinton e colegas igualaram cápsulas e CNN em pontos de vista familiares, depois
+testaram as duas em azimutes e elevações excluídos do treino. O erro das cápsulas
+ficou cerca de $30\%$ abaixo: $13{,}5\%$ contra $20{,}0\%$ em novos azimutes,
+$12{,}3\%$ contra $17{,}8\%$ em novas elevações. O delineamento vale tanto quanto
+o número --- igualar antes de medir isola o efeito do ponto de vista, e é a
+lógica da razão de retenção usada aqui.
+
+A evidência contrária é igualmente direta. Gu e Tresp não encontraram a
+equivariância prometida sob transformações afins, e uma variante simplificada
+subiu de $79\%$ para $93{,}21\%$ em AffNIST~\cite{gu2020affine}. Gu, Tresp e Hu
+atribuíram a robustez das cápsulas à perda de margem e ao termo de reconstrução,
+não aos componentes capsulares~\cite{gu2021notrobust}. Xi, Bing e Jin já haviam
+medido queda acentuada em dados mais complexos que o MNIST~\cite{xi2017capsule}.
+Mitterreiter e colegas vão além e apontam a árvore de análise dinâmica como a
+razão de as cápsulas não escalarem~\cite{mitterreiter2023scale}.
+
+\paragraph{Eficiência amostral.}
+Jiménez-Sánchez, Albarqouni e Mateus compararam cápsulas e CNNs em imagem
+médica~\cite{jimenez2018capsules}. As cápsulas igualaram ou superaram as CNNs com
+menos dados anotados e toleraram melhor o desbalanceamento --- condição próxima à
+do D-Fire. Essa reivindicação é a menos testada das duas: quase nunca é isolada
+da augmentação, que sozinha cobre parte da variação que as cápsulas deveriam
+dispensar.
+
+% ---------------------------------------------------------------------
+\section{Linhas de base e avaliação}
+\label{sec:revisao:baselines}
+
+As duas linhas de base vêm de paradigmas distintos: a ResNet-18,
+convolucional~\cite{he2016resnet}, e o DeiT-Tiny, variante do \emph{Vision
+Transformer}~\cite{dosovitskiy2021vit} treinável sem dados
+externos~\cite{touvron2021deit}. A comparação entre esses dois paradigmas já deu
+um alerta. Bai e colegas mostraram que a vantagem dos Transformers em robustez
+desaparece quando protocolo, augmentação e parâmetros são
+igualados~\cite{bai2021transformers}. Cápsulas tampouco são a única via para
+equivariância --- redes equivariantes a grupos a obtêm por
+construção~\cite{cohen2016group}.
+
+A avaliação segue Hendrycks e Dietterich~\cite{hendrycks2019benchmarking}:
+corrupções aplicadas ao teste, métricas normalizadas pela acurácia limpa. A
+augmentação é o confundidor a controlar. RandAugment~\cite{cubuk2020randaugment}
+e Random Erasing~\cite{zhong2020randomerasing} podem dar a redes comuns boa parte da
+tolerância que se credita à arquitetura, então qualquer vantagem das cápsulas
+precisa ser medida sob regimes de augmentação separados.
+
+% ---------------------------------------------------------------------
+\section{Lacuna}
+\label{sec:revisao:lacuna}
+
+Ficam três lacunas. A primeira é de arquitetura: os dois lados testaram a CapsNet
+de 2017 ou cápsulas matriciais, não a formulação de passo único do
+Efficient-CapsNet. A segunda é de domínio: os experimentos se concentram em
+MNIST, AffNIST e smallNORB, e levantamentos recentes registram o
+impasse~\cite{haq2023survey}. A terceira é de delineamento: robustez, augmentação
+e fração de dados raramente aparecem cruzados, que é justamente o cruzamento
+exigido pelo resultado de Bai e colegas~\cite{bai2021transformers}.
+
+Este trabalho cobre as três. O delineamento cruza arquitetura, conjunto de dados
+--- CIFAR-10~\cite{krizhevsky2009cifar} e D-Fire~\cite{venancio2022dfire} ---,
+fração de treino, augmentação e semente, e avalia cada modelo sob transformações
+ausentes do treino. O D-Fire reúne imagens de vigilância, de UAVs e da web, com
+variação real de ponto de vista e escala. É a variação que interessa aqui:
+revisões da área apontam a generalização a condições não vistas como o problema
+central desses sistemas~\cite{elhanashi2025review}.
+
+As hipóteses são falsificáveis e o desfecho está em aberto. Um resultado negativo
+informa tanto quanto um positivo: nos dois casos a reivindicação passa por um
+regime --- imagens naturais, protocolo igualado --- onde ainda não foi testada. O
+protocolo está no Capítulo~\ref{ch:protocol}.

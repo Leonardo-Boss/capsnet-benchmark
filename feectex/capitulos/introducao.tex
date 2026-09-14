@@ -1,6 +1,17 @@
-%!TeX root = ../principal.tex
-%!TeX encoding = utf-8
-\chapter{Introdução}
-\label{intro}
+% =====================================================================
+%  INTRODUÇÃO
+%  Importe com \input{introducao} a partir do seu .tex principal.
+%  As chaves \cite{} seguem o arquivo referencias.bib deste trabalho.
+% =====================================================================
 
-Um dos benefícios atribuídos ao capsule network é a maior equivarância do modelo. Tendo maior resistência a rotações e outras transformações, pois ele aprende a relação entre features detectados nas capsulas primarias. Apesar disso com os avanços de modelos atuais e novas técnicas de aumentação fica a dúvida se esses benefícios ainda são relevantes. Por isso este trabalho faz uma comparação para esclarecer essa dúvida. Treinamos três modelos—Efficient-CapsNet \citar{mazzia2021efficient}, ResNet-18 \citar{he2016deep} e DeiT-Tiny \citar{dosovitskiy2021image}—no dataset cifar10 \citar{alex2009learning} e MNIST \citar{lecun2010mnist}, com três opções de aumentação (sem, padrão, forte), em regimes de dados diferente (33\%, 66\%, 100\%), com 3 sementes diferentes (para qualificação apenas cifar-10, sem + forte, 33\% + 100\%, 1 semente estimativa 17 horas de treino). Para ser uma comparação justa utilizamos os mesmos hiper parâmetros, as mesmas sementes, e o mesmo split dos datasets, e comparamos não apenas mesma quantidade de épocas mas também mesma quantidade de horas de treinamento. Também serão utilizadas transformações não vistas no treinamento para verificar se a equivarância do capsnet realmente funciona e consegue competir com os outros modelos.
+\chapter{Introdução}
+\label{ch:introducao}
+As redes de cápsulas prometem equivariância. A propriedade vem da forma como a cápsula representa uma entidade: a orientação do vetor codifica a pose. Com a pose explícita, a rede aprende a relação entre as características detectadas nas cápsulas primárias. Dessa relação viria a resistência a rotações e a outras transformações ausentes do treinamento.
+
+A promessa é de 2017. Desde então, augmentação e regularização deram aos modelos convolucionais e de atenção boa parte da tolerância que se atribuía à arquitetura. Fica a dúvida se a vantagem das cápsulas ainda existe.
+
+Para esclarecer essa dúvida, este trabalho compara três arquiteturas: Efficient-CapsNet, ResNet-18 e DeiT-Tiny. Treinamos as três do zero em CIFAR-10 e D-Fire, sob três regimes de augmentação (nenhuma, padrão, forte), três frações de dados (33\%, 66\%, 100\%) e três sementes.
+
+A comparação só é justa se nada além da arquitetura variar. As três usam os mesmos hiperparâmetros, as mesmas sementes e as mesmas partições. Comparamos sob dois orçamentos: mesmo número de épocas e mesmo tempo de treino.
+
+O teste da equivariância vem depois do treino. Avaliamos cada modelo sob transformações que ele nunca viu e medimos quanto da acurácia limpa cada arquitetura retém.
