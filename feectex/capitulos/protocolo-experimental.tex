@@ -118,16 +118,6 @@ Applications, 2022.
 % TODO: transformar em \cite{venancio2022dfire} agora que a entrada BibTeX
 % existe em referencias.bib.
 
-\subsection{Partições e pré-processamento}
-Uma fração fixa $\rho_{\text{val}} = 0{,}1$ do treino é separada para validação e
-seleção do modelo. O conjunto oficial de teste serve apenas à avaliação final do
-Capítulo~\ref{ch:results}. % TODO: corrigir referência cruzada
-Para o D-Fire usamos a partição oficial dos autores, de aproximadamente
-$80\%/20\%$.
-As imagens são redimensionadas para $224\times224$ pixels.
-% TODO: confirmar as contagens exatas de treino e teste na cópia baixada e
-% corrigir a Tabela~\ref{tab:datasets} se necessário.
-
 
 \begin{table}[t]
   \centering
@@ -137,8 +127,8 @@ As imagens são redimensionadas para $224\times224$ pixels.
     \toprule
     Conjunto & Classes & Treino & Val. & Teste & Entrada \\
     \midrule
-    CIFAR-10 & 10 & 50.000 & & 10.000 & $3\times32\times32$ \\
-    D-Fire   & 2  & 17.221 & & 4.306  & $3\times224\times224$ \\
+    CIFAR-10 & 10 & 45.000 & 5.000 & 10.000 & $3\times32\times32$ \\
+    D-Fire   & 2  & 12.710 & 1.412 & 4.306 & $3\times224\times224$ \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -163,9 +153,9 @@ Todos os Modelos são treinados apartir do zero sem pré-treino.
     \cmidrule(lr){2-3}\cmidrule(lr){4-5}
      & Params (M) & GMACs & Params (M) & GMACs \\
     \midrule
-    Efficient-CapsNet & & & & \\
-    ResNet-18         & & & & \\
-    DeiT-Tiny         & & & & \\
+    Efficient-CapsNet & 3,94 & 0,049 & 3,85 & 0,458 \\
+    ResNet-18         & 11,17 & 0,558 & 11,18 & 1,825 \\
+    DeiT-Tiny         & 5,36 & 0,252 & 5,52 & 0,913 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -190,10 +180,6 @@ na Seção~\ref{sec:protocol:threats}.
 % TODO: discutir em que medida o confundidor é evitável. Treinar as linhas de
 % base com perda de margem seria uma alternativa; declarar se foi considerada.
 
-\subsection{Otimização}
-Todos os modelos compartilham a configuração da Tabela~\ref{tab:hyperparams}.
-% TODO: conferir a tabela contra a configuração efetivamente usada nos YAMLs.
-
 \begin{table}[t]
   \centering
   \caption{Hiperparâmetros de treino. Idênticos para todas as arquiteturas,
@@ -209,11 +195,11 @@ Todos os modelos compartilham a configuração da Tabela~\ref{tab:hyperparams}.
     Escalonamento            & Exponencial, $\gamma = 0{,}98$ por época \\
     Tamanho do lote          & 16 \\
     Épocas (máx.)            & 100 \\
-    Decaimento de peso       & % TODO
-                               \\
+    Decaimento de peso       & 0 (nenhum) \\
+    Recorte do gradiente     & norma $\ell_2$ máx. 5,0 \\
     Seleção do modelo        & Menor perda de validação \\
-    Precisão                 & % TODO: fp32 / amp
-                               \\
+    Precisão                 & fp32 (sem AMP) \\
+    Fração de validação      & 0,1 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -229,8 +215,7 @@ critérios: mesmo número de épocas e mesmo tempo de treino.
 % conclusão principal, caso os dois discordem.
 
 \subsection{Hardware e tempo de execução}
-Os modelos foram treinados em uma RTX 2060 de 6\,GB de VRAM. O ambiente usa CUDA
-13.3, PyTorch 2.13.0, Python 3.14.7 e Arch Linux 7.1.8-arch1-3 x86\_64.
+Os modelos foram treinados em uma RTX 2060 de 6\,GB de VRAM. O ambiente usa CUDA 13.3, PyTorch 2.13.0, Python 3.14.7 e Arch Linux (kernel 7.1.8-arch1-3).
 
 % ---------------------------------------------------------------------
 \section{Delineamento experimental}
@@ -265,14 +250,21 @@ Tabela~\ref{tab:design}.
   \caption{Regimes de augmentação em treino. Todos são seguidos de conversão
   para tensor e normalização por canal.}
   \label{tab:aug-regimes}
-  \begin{tabular}{l p{0.68\textwidth}}
+  \begin{tabular}{l l p{0.68\textwidth}}
     \toprule
-    Regime & Operações \\
+    Dataset & Regime & Operações \\
     \midrule
-    nenhuma & --- \\
-    padrão  & Recorte aleatório (preenchimento $p=4$), espelhamento horizontal,
-              rotação $\pm15^{\circ}$ \\
-    forte   & padrão $+$ RandAugment $+$ Random Erasing \\
+    CIFAR-10 & none & --- \\
+    D-Fire & none & --- \\
+    CIFAR-10 & standard & recorte aleatório $32\times32$ (preenchimento 4), espelhamento horizontal ($p=0,5$), rotação $\pm15^{\circ}$ \\
+    D-Fire & standard & espelhamento horizontal ($p=0,5$), rotação $\pm15^{\circ}$ \\
+    CIFAR-10 & strong & recorte aleatório $32\times32$ (preenchimento 4), espelhamento horizontal ($p=0,5$), rotação $\pm15^{\circ}$, RandAugment ($N=2$ operações, magnitude $M=9$ de 30), Random Erasing ($p=0,5$, área $0,02$--$0,33$, razão $0,3$--$3,3$, valor 0) \\
+    D-Fire & strong & espelhamento horizontal ($p=0,5$), rotação $\pm15^{\circ}$, ColorJitter (brilho $\times[0,7;\,1,3]$, contraste $\times[0,7;\,1,3]$), RandAugment ($N=2$ operações, magnitude $M=9$ de 30), Random Erasing ($p=0,5$, área $0,02$--$0,33$, razão $0,3$--$3,3$, valor 0) \\
+
+    % nenhuma & --- \\
+    % padrão  & Recorte aleatório (preenchimento $p=4$), espelhamento horizontal,
+    %           rotação $\pm15^{\circ}$ \\
+    % forte   & padrão $+$ RandAugment $+$ Random Erasing \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -381,6 +373,25 @@ extremas:
 % e declarar a escolha.
 
 \subsection{Custo computacional}
+% suggested table
+\begin{table}[t]
+  \centering
+  \caption{custo computacional}
+  \label{tab:dfire-content}
+  \begin{tabular}{l l r r l r r}
+    \toprule
+    Dataset & Modelo & s/época & h/treino & Mem. (GB) \\
+    \midrule
+    CIFAR-10 & Efficient-CapsNet & 15,6 & 0,4 $\pm$ 0,2 & 0,10 \\
+    CIFAR-10 & ResNet-18 & 48,6 & 1,3 $\pm$ 0,5 & 0,27 \\
+    CIFAR-10 & DeiT-Tiny & 37,4 & 1,0 $\pm$ 0,4 & 0,23 \\
+    D-Fire & Efficient-CapsNet & 49,4 & 1,4 $\pm$ 0,5 & 0,56 \\
+    D-Fire & ResNet-18 & 49,9 & 1,4 $\pm$ 0,5 & 0,63 \\
+    D-Fire & DeiT-Tiny & 50,0 & 1,4 $\pm$ 0,5 & 0,54 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 % TODO: parâmetros, GMACs, segundos de relógio por época e pico de memória de
 % GPU. Tudo já é registrado por época pelo arcabouço de treino.
 
@@ -418,66 +429,6 @@ sementes.
 % classe e por partição. A tarefa de classificação usada aqui não é a tarefa
 % distribuída pelos autores.
 
-% ---------------------------------------------------------------------
-\section{Modelos de tabela para os resultados}
-\label{sec:protocol:templates}
-% Remover esta seção antes da entrega final. Ela existe para que o capítulo de
-% resultados tenha uma forma fixa a preencher.
-
-\begin{table}[t]
-  \centering
-  \caption{Acurácia de teste limpa (\%) por arquitetura, fração de dados e regime
-  de augmentação. Média $\pm$ desvio padrão sobre três sementes.
-  \textsc{Conjunto}: % TODO
-  }
-  \label{tab:main-results}
-  \begin{tabular}{llccc}
-    \toprule
-    \multirow{2}{*}{Modelo} & \multirow{2}{*}{Aug.} & \multicolumn{3}{c}{Fração de dados $f$} \\
-    \cmidrule(lr){3-5}
-     & & $0{,}33$ & $0{,}66$ & $1{,}00$ \\
-    \midrule
-    \multirow{3}{*}{Efficient-CapsNet}
-      & nenhuma  & & & \\
-      & padrão   & & & \\
-      & forte    & & & \\
-    \midrule
-    \multirow{3}{*}{ResNet-18}
-      & nenhuma  & & & \\
-      & padrão   & & & \\
-      & forte    & & & \\
-    \midrule
-    \multirow{3}{*}{DeiT-Tiny}
-      & nenhuma  & & & \\
-      & padrão   & & & \\
-      & forte    & & & \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\begin{table}[t]
-  \centering
-  \caption{Razão de retenção $R_{c}$ sob transformações não vistas, em
-  $f = 1{,}00$. % TODO: repetir ou agregar sobre as frações
-  }
-  \label{tab:robustness}
-  \begin{tabular}{lccccccc}
-    \toprule
-    Modelo & Ruído & Desf. & Brilho & Contr. & Ocl. & Rot.\ $90^{\circ}$ & Média \\
-    \midrule
-    Efficient-CapsNet & & & & & & & \\
-    ResNet-18         & & & & & & & \\
-    DeiT-Tiny         & & & & & & & \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-% TODO: figura -- acurácia contra fração de dados, um painel por conjunto, uma
-% linha por arquitetura, com a variação entre sementes sombreada.
-% TODO: figura -- acurácia contra ângulo de rotação, um painel por regime de
-% augmentação.
-
-% ---------------------------------------------------------------------
 \section{Ameaças à validade}
 \label{sec:protocol:threats}
 

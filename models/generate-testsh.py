@@ -4,12 +4,12 @@ from os import listdir
 
 augmentations = (
     'none',
-    'strong',
+    'strong'
 )
 unseens = (
     None,
     '',
-    'large_rotation',
+    'large_rotation'
 )
 config_paths = listdir('configs')
 
@@ -23,7 +23,7 @@ for config_path in config_paths:
         c_aug = f"{c_config_model} --augmentation {augmentation}"
         for unseen in unseens:
             if unseen == None:
-                c_unseen = c_config_model
+                c_unseen = c_aug
             elif unseen == '':
                 c_unseen = f"{c_aug} --unseen-transformation"
             else:

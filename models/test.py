@@ -65,7 +65,7 @@ def build_eval_transform(
     spec: dict,
     augmentation: str,
     unseen_names: list[str] | None,
-    img_size: int,
+    img_size: int | None,
 ) -> transforms.Compose:
     """Builds the image transform for this run's single condition.
 
@@ -79,7 +79,7 @@ def build_eval_transform(
             stacked on top of the augmentation regime. None/empty list
             means no unseen corruption is applied.
         img_size: side length images are resized to, for the datasets
-            that need resizing. Ignored for CIFAR-10.
+            that need resizing. None for CIFAR-10, which is not resized.
     """
     ops = []
 
@@ -111,6 +111,37 @@ def build_eval_transform(
 
     ops.append(transforms.Normalize(spec["mean"], spec["std"]))
     return transforms.Compose(ops)
+
+
+def resolve_img_size(spec: dict, loader_args: dict, arch_args: dict) -> int | None:
+    """Finds the side length test images must be resized to, if any.
+
+    Only the resizing datasets need one, and where it comes from depends
+    on the architecture: the loader's own `img_size` if the config sets
+    it, else `arch.args.img_size` (DeiT), else the last dim of
+    `arch.args.input_size` (Efficient-CapsNet). TimmClassifier configs
+    like ResNet-18 declare neither, which is fine -- on CIFAR-10 nothing
+    is resized, and on a resizing dataset the loader's `img_size` is
+    what trained the model anyway.
+
+    Returns:
+        int | None: the size, or None for datasets that don't resize.
+    """
+    if not spec["resize"]:
+        return None
+
+    size = loader_args.get("img_size") or arch_args.get("img_size")
+    if size is None:
+        input_size = arch_args.get("input_size")
+        if input_size:
+            size = input_size[-1]
+
+    if size is None:
+        raise ValueError(
+            "This dataset resizes its images, but no image size could be found. "
+            "Set data_loader.args.img_size in the config."
+        )
+    return int(size)
 
 
 def build_test_dataset(spec: dict, loader_args: dict, data_dir: str, transform):
@@ -219,6 +250,40 @@ def build_output_name(model_name: str, augmentation: str, unseen_names: list[str
         parts.append("clean")  # nothing toggled -- plain baseline eval
     return "_".join(parts) + ".csv"
 
+def read_existing_result(out_path: Path) -> tuple[int, float] | None:
+    """Reads back an earlier run's CSV, if there is a usable one.
+
+    Guards against skipping on a file left behind by a crashed or
+    interrupted run: a result only counts as done if it parses, carries
+    the expected header, and holds at least one data row. Anything else
+    (missing, empty, truncated mid-header, wrong columns) reports as not
+    done, so the condition is simply re-run and overwritten.
+
+    Returns:
+        tuple[int, float] | None: (row count, accuracy) of the existing
+            result, or None if there isn't a usable one.
+    """
+    if not out_path.is_file() or out_path.stat().st_size == 0:
+        return None
+
+    try:
+        with out_path.open("r", newline="", encoding="utf8") as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames or "correct" not in reader.fieldnames:
+                return None
+            n = 0
+            correct = 0
+            for row in reader:
+                correct += int(row["correct"])
+                n += 1
+    except (OSError, csv.Error, ValueError, TypeError, UnicodeDecodeError):
+        return None
+
+    if n == 0:
+        return None
+    return n, correct / n
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate a trained model on the test set")
     parser.add_argument(
@@ -244,11 +309,48 @@ def main():
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_workers", type=int, default=1)
     parser.add_argument("--output_dir", default="results", help="directory to write the CSV into")
+    parser.add_argument(
+        "--overwrite", action="store_true",
+        help=(
+            "re-run and overwrite this condition even if its CSV already "
+            "exists (default: skip conditions that have already been tested)"
+        ),
+    )
     args = parser.parse_args()
 
     cfg_dict = read_yaml(args.config)
     cfg = Config(cfg_dict, run_id="eval_" + Path(args.model).stem)
     logger = get_logger(name="eval", verbosity=cfg["main"]["verbosity"])
+
+    unseen_enabled = args.unseen_transformation is not None
+    unseen_names = list(UNSEEN_TRANSFORMS) if unseen_enabled and not args.unseen_transformation \
+        else args.unseen_transformation
+
+    # the output path depends only on the checkpoint and the condition
+    # flags, so the already-tested check happens here -- before the
+    # checkpoint is loaded onto the GPU and before the test split is
+    # indexed, which is the whole point of skipping
+    model_name = Path(args.model).parent.name
+    out_name = build_output_name(
+        model_name, args.augmentation, unseen_names if unseen_enabled else None
+    )
+    out_path = Path(args.output_dir) / out_name
+
+    existing = read_existing_result(out_path)
+    if existing is not None and not args.overwrite:
+        n_rows, prev_acc = existing
+        logger.info(
+            "Already tested: %s (%d rows, accuracy %.4f) -- skipping. "
+            "Pass --overwrite to re-run.",
+            out_path, n_rows, prev_acc,
+        )
+        return
+
+    logger.info("Augmentation  : %s", args.augmentation)
+    logger.info(
+        "Unseen        : %s",
+        ", ".join(unseen_names) if unseen_enabled else "disabled",
+    )
 
     device = torch.device(
         "cuda" if cfg["main"]["cuda"] and torch.cuda.is_available() else "cpu"
@@ -257,16 +359,6 @@ def main():
 
     model = load_model(cfg, args.model, device)
     logger.info("Loaded checkpoint: %s", args.model)
-
-    unseen_enabled = args.unseen_transformation is not None
-    unseen_names = list(UNSEEN_TRANSFORMS) if unseen_enabled and not args.unseen_transformation \
-        else args.unseen_transformation
-
-    logger.info("Augmentation  : %s", args.augmentation)
-    logger.info(
-        "Unseen        : %s",
-        ", ".join(unseen_names) if unseen_enabled else "disabled",
-    )
 
     loader_type = cfg["data_loader"]["type"]
     if loader_type not in DATASET_SPECS:
@@ -278,7 +370,7 @@ def main():
     loader_args = cfg["data_loader"]["args"]
     logger.info("Dataset       : %s", loader_type)
 
-    img_size = loader_args.get("img_size") or cfg["arch"]["args"]["input_size"][-1]
+    img_size = resolve_img_size(spec, loader_args, cfg["arch"]["args"])
     transform = build_eval_transform(spec, args.augmentation, unseen_names, img_size)
     data_dir = args.data_dir or loader_args["data_dir"]
     dataset = build_test_dataset(spec, loader_args, data_dir, transform)
@@ -289,10 +381,6 @@ def main():
     rows = evaluate(model, loader, device)
     acc = sum(r["correct"] for r in rows) / len(rows)
     logger.info("Accuracy      : %.4f", acc)
-
-    model_name = Path(args.model).parent.name
-    out_name = build_output_name(model_name, args.augmentation, unseen_names if unseen_enabled else None)
-    out_path = Path(args.output_dir) / out_name
 
     write_csv(rows, out_path)
     logger.info("Wrote %d rows to %s", len(rows), out_path)

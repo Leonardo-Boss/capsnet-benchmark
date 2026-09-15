@@ -12,15 +12,21 @@ USAGE
     python analyze_robustness.py --data-dir /path/to/csvs --out-dir ./results
 
 Expects files named:
-    modelname_database_augtrain_trainfrac_seed_[strong_]<condition>.csv
+    modelname_database_augtrain_trainfrac_seed_[testaug_]<condition>.csv
 
-e.g.  ecaps_cifar_10_standard_0.66_2_unseen-all.csv
+e.g.  ecaps_cifar_10_standard_0_66_2_unseen-all.csv
       -> model=ecaps, database=cifar_10, train_aug=standard, train_amount=0.66,
          seed=2, test_aug=none, transformation=unseen-all
 
-where <condition> in {clean, unseen-all, unseen-large_rotation}, and an
-optional "strong_" prefix indicates strong augmentation was applied to the
-test-time transformation itself (a harsher version of the shift).
+The training fraction may be written with either separator ("0_66" or "0.66"),
+and is matched against the pinned TRAIN_AMOUNTS list below -- an underscore
+fraction is ambiguous with the seed field, so the accepted values have to be
+known in advance.
+
+<condition> is in {clean, unseen-all, unseen-large_rotation}. An optional
+test-aug prefix (any non-"none" key of TEST_AUG_LABELS, e.g. "strong_" or
+"standard_") indicates augmentation was applied to the test-time
+transformation itself, a harsher version of the shift.
 
 Each CSV has columns: sample_idx,true_label,pred_label,correct,confidence
 (confidence is a raw, unbounded score -- NOT a softmax probability, and NOT
@@ -75,7 +81,7 @@ except Exception:
 # ----------------------------------------------------------------------------
 
 MODEL_NAMES = ["deit_tiny", "ecaps", "resnet18"]
-DATABASES = ["cifar_10", "flame"]
+DATABASES = ["cifar_10", "dfire"]
 
 MODEL_LABELS = {
     "deit_tiny": "DeiT-Tiny",
@@ -90,16 +96,23 @@ MODEL_COLORS = {
 }
 MODEL_MARKERS = {"resnet18": "o", "deit_tiny": "s", "ecaps": "D"}
 
-DATABASE_LABELS = {"cifar_10": "CIFAR-10", "flame": "FLAME"}
+DATABASE_LABELS = {"cifar_10": "CIFAR-10", "dfire": "D-FIRE"}
 CLASS_NAMES = {
     "cifar_10": ["airplane", "automobile", "bird", "cat", "deer",
                  "dog", "frog", "horse", "ship", "truck"],
-    "flame": ["Fire", "No_Fire"],
+    "dfire": ["Fire", "No_Fire"],
 }
 
 TRAIN_AUG_LABELS = {"none": "No aug", "standard": "Standard aug", "strong": "Strong aug"}
 TRAIN_AUG_ORDER = ["none", "standard", "strong"]
 TRAIN_AUG_MARKERS = {"none": "o", "standard": "s", "strong": "^"}
+
+# The training-set fractions the sweep actually used. These are pinned rather
+# than inferred with a loose [0-9.]+ pattern because the filenames write the
+# fraction with an underscore ("0_66"), which a greedy numeric pattern happily
+# mis-parses as train_amount=0 / seed=66. Both "0_66" and "0.66" are accepted.
+# Add a value here if you ever run a new fraction.
+TRAIN_AMOUNTS = [0.33, 0.66, 1]
 
 TRANSFORM_LABELS = {
     "clean": "Clean",
@@ -109,7 +122,12 @@ TRANSFORM_LABELS = {
 CONDITION_ORDER = ["clean", "unseen-large_rotation", "unseen-all"]
 SHIFT_ORDER = ["unseen-large_rotation", "unseen-all"]
 
-TEST_AUG_LABELS = {"none": "normal", "strong": "strong"}
+# Test-time augmentation applied on top of the shift. test.py writes this as a
+# prefix on the condition suffix for anything that is not "none", so every
+# non-"none" value has to be listed here or it gets swallowed into the
+# transformation name (e.g. test_aug="none", transformation="standard_unseen-all").
+TEST_AUG_LABELS = {"none": "normal", "standard": "standard", "strong": "strong"}
+TEST_AUG_ORDER = ["none", "standard", "strong"]
 
 REQUIRED_COLS = {"sample_idx", "true_label", "pred_label", "correct", "confidence"}
 
@@ -155,13 +173,31 @@ def setting_label(train_aug, train_amount):
 # PARSING & LOADING
 # ----------------------------------------------------------------------------
 
+def _amount_alternatives():
+    """Literal spellings of each entry in TRAIN_AMOUNTS, longest first.
+
+    A fraction of 0.66 may appear on disk as "0.66" or "0_66"; a whole number
+    as "1", "1.0" or "1_0". Matching an explicit alternation (rather than a
+    generic numeric class) is what keeps "0_66_3" from being read as
+    amount=0, seed=66."""
+    alts = []
+    for a in TRAIN_AMOUNTS:
+        if float(a).is_integer():
+            i = int(a)
+            alts += [f"{i}[._]0", str(i)]
+        else:
+            alts.append(re.escape(f"{a}").replace(r"\.", "[._]"))
+    return sorted(set(alts), key=len, reverse=True)
+
+
 def build_pattern():
     model_pat = "|".join(re.escape(m) for m in sorted(MODEL_NAMES, key=len, reverse=True))
     db_pat = "|".join(re.escape(d) for d in sorted(DATABASES, key=len, reverse=True))
     aug_pat = "|".join(re.escape(a) for a in sorted(TRAIN_AUG_LABELS, key=len, reverse=True))
+    amt_pat = "|".join(_amount_alternatives())
     return re.compile(
         rf"^(?P<model>{model_pat})_(?P<database>{db_pat})_"
-        rf"(?P<train_aug>{aug_pat})_(?P<train_amount>[0-9.]+)_(?P<seed>[0-9]+)_(?P<suffix>.+)\.csv$"
+        rf"(?P<train_aug>{aug_pat})_(?P<train_amount>{amt_pat})_(?P<seed>[0-9]+)_(?P<suffix>.+)\.csv$"
     )
 
 
@@ -171,13 +207,21 @@ def parse_filename(fname, pattern):
         return None
     d = m.groupdict()
     suffix = d.pop("suffix")
-    if suffix.startswith("strong_"):
-        test_aug, transformation = "strong", suffix[len("strong_"):]
-    else:
-        test_aug, transformation = "none", suffix
+    # test.py builds the suffix as '[test_aug_]condition', omitting each segment
+    # that is switched off -- so a run with strong test-time augmentation on
+    # *unshifted* images is named '..._strong.csv', with no condition at all.
+    # That bare form has to be recognised or it lands in transformation='strong'.
+    test_aug, transformation = "none", suffix
+    for ta in sorted((k for k in TEST_AUG_LABELS if k != "none"), key=len, reverse=True):
+        if suffix == ta:
+            test_aug, transformation = ta, "clean"
+            break
+        if suffix.startswith(ta + "_"):
+            test_aug, transformation = ta, suffix[len(ta) + 1:]
+            break
     d["test_aug"] = test_aug
     d["transformation"] = transformation
-    d["train_amount"] = float(d["train_amount"])
+    d["train_amount"] = float(d["train_amount"].replace("_", "."))
     d["seed"] = int(d["seed"])
     return d
 
@@ -231,24 +275,32 @@ def report_missing_combos(df, out_dir):
     models = sorted(df["model"].unique())
     train_augs = sorted(df["train_aug"].unique(),
                         key=lambda x: TRAIN_AUG_ORDER.index(x) if x in TRAIN_AUG_ORDER else 99)
-    train_amounts = sorted(df["train_amount"].unique())
-    test_augs = sorted(df["test_aug"].unique())
-    transformations = sorted(df["transformation"].unique(),
-                             key=lambda x: CONDITION_ORDER.index(x) if x in CONDITION_ORDER else 99)
+    # The expected grid comes from the pinned sweep definition, not from whatever
+    # happens to be on disk -- otherwise a fraction that failed to run for every
+    # single config disappears from the completeness check entirely.
+    train_amounts = sorted(set(TRAIN_AMOUNTS) | set(df["train_amount"].unique()))
+    # (test_aug, transformation) are NOT independent: test.py never writes a
+    # 'standard test aug x unseen-all' file unless that eval was actually run,
+    # and crossing the two axes invents combos that were never part of the
+    # design. Take the pairs that occur anywhere in the data instead.
+    cond_pairs = sorted(
+        set(map(tuple, df[["test_aug", "transformation"]].drop_duplicates().values)),
+        key=lambda p: (CONDITION_ORDER.index(p[1]) if p[1] in CONDITION_ORDER else 99,
+                       TEST_AUG_ORDER.index(p[0]) if p[0] in TEST_AUG_ORDER else 99))
     max_seeds = int(df.groupby(GROUP_COLS)["seed"].nunique().max())
 
     present = df.groupby(GROUP_COLS)["seed"].nunique().reset_index()
     present_keys = {tuple(r[c] for c in GROUP_COLS): r["seed"] for _, r in present.iterrows()}
 
     rows = []
-    for combo in product(databases, models, train_augs, train_amounts, test_augs, transformations):
-        if combo[4] == "strong" and combo[5] == "clean":
-            continue  # nonsensical: no strong test-time version of "clean"
-        n_seeds = present_keys.get(combo, 0)
-        status = "OK" if n_seeds == max_seeds else ("MISSING" if n_seeds == 0 else "PARTIAL")
-        if status != "OK":
-            rows.append(dict(zip(GROUP_COLS, combo)) |
-                        {"seeds_found": n_seeds, "seeds_expected": max_seeds, "status": status})
+    for head in product(databases, models, train_augs, train_amounts):
+        for test_aug, transformation in cond_pairs:
+            combo = head + (test_aug, transformation)
+            n_seeds = present_keys.get(combo, 0)
+            status = "OK" if n_seeds == max_seeds else ("MISSING" if n_seeds == 0 else "PARTIAL")
+            if status != "OK":
+                rows.append(dict(zip(GROUP_COLS, combo)) |
+                            {"seeds_found": n_seeds, "seeds_expected": max_seeds, "status": status})
     if rows:
         missing_df = pd.DataFrame(rows)
         print(f"\nSweep completeness (expecting {max_seeds} seed(s) per combo):")
@@ -426,7 +478,12 @@ def add_robustness_metrics(summary, refs):
     # be looked up per training config and reused for the strong-test-aug rows.
     # Grouping on test_aug (as the previous version did) left every strong row
     # with a NaN clean_accuracy and therefore a NaN drop -- half the table.
-    clean_ref = summary[summary["transformation"] == "clean"].set_index(
+    # 'clean' now exists at more than one test_aug (an unshifted eval can still
+    # carry test-time augmentation), so the reference is pinned to the untouched
+    # test_aug='none' run -- otherwise this index has duplicates and .loc returns
+    # a Series instead of a scalar.
+    clean_ref = summary[(summary["transformation"] == "clean") &
+                        (summary["test_aug"] == "none")].set_index(
         ["database", "model", "train_aug", "train_amount"])[["accuracy", "macro_f1"]]
     out = []
     for keys, g in summary.groupby(["database", "model", "train_aug", "train_amount", "test_aug"]):
@@ -455,7 +512,8 @@ def add_robustness_metrics(summary, refs):
 def add_robustness_metrics_seed_level(seed_summary):
     """Paired-by-seed drop: for each seed, clean minus shifted, THEN averaged.
     This is the statistically correct way to get an error bar on the gap."""
-    clean_ref = seed_summary[seed_summary["transformation"] == "clean"].set_index(
+    clean_ref = seed_summary[(seed_summary["transformation"] == "clean") &
+                             (seed_summary["test_aug"] == "none")].set_index(
         ["database", "model", "train_aug", "train_amount", "seed"])[["accuracy", "macro_f1"]]
     out = []
     for keys, g in seed_summary.groupby(["database", "model", "train_aug", "train_amount", "test_aug", "seed"]):
@@ -554,15 +612,17 @@ def make_tables(df, summary, seed_summary, refs, out_dir):
     pivot = pivot.reindex(columns=[tlabel(c) for c in CONDITION_ORDER if tlabel(c) in pivot.columns])
     save_table(pivot.reset_index(), out_dir, "02_accuracy_pivot_normal_test_aug")
 
-    b2 = summary[summary["test_aug"] == "strong"]
-    if len(b2):
+    for ta in [t for t in TEST_AUG_ORDER if t != "none"]:
+        b2 = summary[summary["test_aug"] == ta]
+        if not len(b2):
+            continue
         b2 = b2.copy()
         b2["train_setting"] = (b2["database_label"] + " | " + b2["model_label"] + " | " +
                                b2["train_aug"] + " | frac=" + b2["train_amount"].astype(str))
         b2["cell"] = b2.apply(lambda r: f"{r['accuracy']:.3f} ± {r['accuracy_std']:.3f}", axis=1)
         save_table(b2.pivot_table(index="train_setting", columns="transformation_label",
                                   values="cell", aggfunc="first").reset_index(),
-                   out_dir, "02b_accuracy_pivot_strong_test_aug")
+                   out_dir, f"02b_accuracy_pivot_{ta}_test_aug")
 
     mf1 = summary[summary["test_aug"] == "none"].copy()
     mf1["train_setting"] = (mf1["database_label"] + " | " + mf1["model_label"] + " | " +
@@ -988,7 +1048,7 @@ def fig_advantage_heatmap(adv_df, out_dir, db):
         return
     sub["row"] = sub.apply(lambda r: setting_label(r["train_aug"], r["train_amount"]), axis=1)
     def _col(r):
-        if r["transformation"] == "clean":
+        if r["transformation"] == "clean" and r["test_aug"] == "none":
             return "Clean"
         return f"{tlabel(r['transformation'])}\n({TEST_AUG_LABELS.get(r['test_aug'], r['test_aug'])} test-time aug)"
     sub["col"] = sub.apply(_col, axis=1)
@@ -996,7 +1056,8 @@ def fig_advantage_heatmap(adv_df, out_dir, db):
                  for f in sorted(sub["train_amount"].unique())]
     row_order = [r for r in row_order if r in set(sub["row"])]
     col_order = ["Clean"] + [f"{tlabel(t)}\n({TEST_AUG_LABELS[ta]} test-time aug)"
-                             for t in SHIFT_ORDER for ta in ["none", "strong"]]
+                             for t in CONDITION_ORDER for ta in TEST_AUG_ORDER
+                             if not (t == "clean" and ta == "none")]
     col_order = [c for c in col_order if c in set(sub["col"])]
     piv = sub.pivot_table(index="row", columns="col", values="ecaps_advantage_pp").reindex(index=row_order, columns=col_order)
     err = sub.pivot_table(index="row", columns="col", values="ecaps_advantage_pp_std").reindex(index=row_order, columns=col_order)
