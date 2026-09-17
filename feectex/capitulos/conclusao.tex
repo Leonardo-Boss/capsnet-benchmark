@@ -1,0 +1,118 @@
+%!TeX root = ../principal.tex
+%!TeX encoding = utf-8
+\chapter{Conclusão}
+\label{ch:conclusao}
+
+Este trabalho perguntou se as redes de cápsulas ainda oferecem alguma vantagem
+sobre arquiteturas convolucionais e de atenção quando as três são comparadas em
+condições iguais. Para responder, treinamos do zero o Efficient-CapsNet, a
+ResNet-18 e o DeiT-Tiny em CIFAR-10 e D-Fire, em uma grade de 162 treinos que
+cruza três regimes de augmentação, três frações de dados e três sementes, e
+avaliamos cada modelo sob transformações ausentes do treino. A resposta, dentro
+desse delineamento, é negativa para as duas promessas centrais das cápsulas.
+
+% ---------------------------------------------------------------------
+\section{Respostas às perguntas de pesquisa}
+\label{sec:conc:rq}
+
+\paragraph{RQ1 --- Equivariância.}
+As cápsulas não degradam menos sob rotação. A retenção capsular sob rotação
+grande não supera a da ResNet-18 no CIFAR-10 ($+1{,}1$~pp, sem significância) e
+fica $1{,}5$~pp abaixo dela no D-Fire, diferença que não resiste à correção
+para múltiplas comparações. Em acurácia absoluta, a ResNet-18 fica à
+frente sob rotação em todos os regimes com augmentação no CIFAR-10, com margem
+de até $8{,}6$~pp, maior que qualquer vantagem capsular observada na grade. Só
+no regime sem augmentação o Efficient-CapsNet fica à frente da ResNet-18 sob
+rotação, e por menos de $2$~pp em $f = 1{,}00$. H1 foi rejeitada.
+
+\paragraph{RQ2 --- Eficiência de dados.}
+A direção prevista aparece: o Efficient-CapsNet perde um pouco menos de
+acurácia ao passar de $100\%$ para $33\%$ dos dados, cerca de $1$~pp a menos
+que a ResNet-18 nos dois conjuntos. A diferença não é significativa com três
+sementes e não altera o ordenamento absoluto em nenhuma fração: no CIFAR-10
+com augmentação forte, a ResNet-18 treinada com um terço dos dados já supera o
+modelo capsular treinado com todos eles. H2 não foi sustentada.
+
+\paragraph{RQ3 --- Interação com augmentação.}
+Não há vantagem capsular para a augmentação absorver. Ao contrário, a
+augmentação amplia a distância: no CIFAR-10, em média sobre as frações, a
+desvantagem do Efficient-CapsNet em dados limpos passa de $2{,}5$~pp sem augmentação para
+$8{,}8$~pp com augmentação padrão e $13{,}2$~pp com augmentação forte. A
+tolerância a transformações que se atribuía à arquitetura capsular é obtida
+pelas linhas de base a partir dos dados, e com mais eficácia. H3 foi rejeitada,
+com o sinal invertido.
+
+% ---------------------------------------------------------------------
+\section{O que as cápsulas oferecem}
+\label{sec:conc:positivos}
+
+Três resultados favorecem o modelo capsular, e nenhum deles é sobre
+equivariância. O Efficient-CapsNet é a arquitetura mais estável entre sementes
+nos dois conjuntos, com amplitude média de $0{,}91$~pp no CIFAR-10, contra
+$1{,}42$~pp da ResNet-18 e $3{,}95$~pp do DeiT-Tiny. Em dados limpos, a norma
+das cápsulas de saída é um bom indicador dos próprios erros, com AUROC de até
+$0{,}856$. E, na tarefa binária do D-Fire, a distância para a melhor linha de
+base cai para $0{,}8$ a $3{,}4$~pp, contra até $13{,}2$~pp no CIFAR-10, com um
+modelo cujo extrator tem dezenas de vezes menos parâmetros.
+
+Esses resultados sugerem que o valor atual das cápsulas, se existe, está em
+modelos pequenos e estáveis para tarefas simples, e não na robustez a
+transformações que motivou sua proposta. Como o delineamento confunde
+arquitetura e função objetivo, parte dessa estabilidade pode vir da perda de
+margem com reconstrução, e não das cápsulas.
+
+% ---------------------------------------------------------------------
+\section{Contribuições metodológicas}
+\label{sec:conc:metodo}
+
+Duas observações valem além da comparação entre arquiteturas. A primeira é que
+a razão de retenção, métrica usual de robustez, é enganosa quando as acurácias
+limpas diferem: nesta grade ela é fortemente anticorrelacionada com a acurácia
+limpa e premia modelos fracos. Reportar a acurácia absoluta sob deslocamento, a
+habilidade retida acima do acaso e as linhas de base triviais evita a leitura
+errada. A segunda é que composições de muitas corrupções saturam: sob as seis
+transformações combinadas, os três modelos ficam no nível do acaso ou da classe
+majoritária, e as diferenças entre eles passam a medir o estilo de colapso, e
+não robustez.
+
+% ---------------------------------------------------------------------
+\section{Limitações}
+\label{sec:conc:limitacoes}
+
+As conclusões valem para o delineamento usado, e as principais ameaças estão
+nas Seções~\ref{sec:protocol:threats} e~\ref{sec:res:threats}. Quatro delas
+limitam mais o alcance do resultado. O modelo capsular é treinado com uma
+função objetivo diferente da das linhas de base. A sonda de rotação usa um
+único ângulo sorteado por imagem, sem varredura. Os hiperparâmetros vêm da
+configuração de referência do Efficient-CapsNet e não foram ajustados para
+nenhuma arquitetura. E três sementes só permitem detectar diferenças de alguns
+pontos percentuais. Somam-se a elas a capacidade não pareada entre as
+arquiteturas e o fato de a augmentação forte não ser o melhor regime para o
+modelo capsular.
+
+% ---------------------------------------------------------------------
+\section{Trabalhos futuros}
+\label{sec:conc:futuros}
+
+Cada limitação sugere um experimento. Treinar a ResNet-18 e o DeiT-Tiny com
+perda de margem e reconstrução separaria o efeito da arquitetura do efeito do
+objetivo, que é a explicação alternativa mais forte na literatura. Uma
+varredura determinística do ângulo de rotação mostraria se as cápsulas levam
+vantagem em rotações pequenas e intermediárias, que a sonda agregada não
+distingue. Mais sementes, uma busca de hiperparâmetros por arquitetura e um
+regime de augmentação escolhido para cada modelo tornariam a comparação mais
+justa com todos. Por fim, estender a comparação a outras formulações de
+cápsulas e a redes equivariantes por construção indicaria se o resultado é
+próprio do Efficient-CapsNet ou da ideia de cápsula.
+
+% ---------------------------------------------------------------------
+\section{Considerações finais}
+\label{sec:conc:final}
+
+O título pergunta se a CapsNet ainda vale a pena. Para quem busca robustez a
+transformações ou eficiência de dados em imagens naturais, a resposta deste
+trabalho é não: uma ResNet-18 com augmentação obtém mais das duas coisas. Para
+quem precisa de um modelo pequeno, estável entre execuções e competitivo em uma
+tarefa simples, as cápsulas continuam sendo uma opção razoável, desde que a
+escolha seja justificada por essas propriedades, e não pela promessa de
+equivariância.

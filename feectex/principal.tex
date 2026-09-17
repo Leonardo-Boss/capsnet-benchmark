@@ -24,10 +24,9 @@
 \usepackage{pdfpages}
 
 \usepackage{fontspec}
-\usepackage{amsmath}
 \usepackage{booktabs}
-\usepackage{geometry}
-\usepackage{graphicx}
+% \usepackage{geometry} % Removido: sobrescreveria as margens ABNT
+                        % (3 cm / 2 cm) definidas pela classe feectex.
 \usepackage{pgfplots}
 \usepackage{float}
 \usepackage{siunitx}
@@ -50,8 +49,8 @@
 
 % Quais são as palavras-chave, em português e em inglês,
 % relacionadas ao trabalho?
-\palavraschave{palavra-chave-1, palavra-chave-2, \dots, palavra-chave-n}
-\keywords{keyword-1, keyword-2, \dots, keyword-n}
+\palavraschave{Redes de cápsulas, Equivariância, Robustez, Aumento de dados, Detecção de incêndio}
+\keywords{Capsule networks, Equivariance, Robustness, Data augmentation, Fire detection}
 
 % Qual é o seu nome e o número do seu RA?
 %\autora{Nome da Autora}
@@ -77,7 +76,7 @@
 
 % Qual data foi ou será realizada a defesa?
 \diadefesa{XX}
-\mesdefesa{Septembro}
+\mesdefesa{Setembro}
 \anodefesa{2026}
 
 % Qual é a área de concentração do trabalho?
@@ -108,18 +107,19 @@
 
     % Elementos pré-textuais.
     \imprimircapa
-    % \imprimirfolhaderosto
+    \imprimirfolhaderosto
+    % A ficha catalográfica é emitida pela biblioteca após a defesa:
     % \imprimirfichacatalografica{ficha-catalografica.pdf}
-    % \imprimirfolhaaprovacao
+    \imprimirfolhaaprovacao
     % \imprimirdedicatoria
-    % \imprimiragradecimentos
+    % \imprimiragradecimentos  % Descomentar após escrever agradecimentos.tex
     % \imprimirepigrafe
-    % \imprimirresumo
-    % \imprimirlistailustracoes
-    % \imprimirlistatabelas
-    % \imprimirlistaabreviaturassiglas
+    \imprimirresumo
+    \imprimirlistailustracoes
+    \imprimirlistatabelas
+    \imprimirlistaabreviaturassiglas
     % \imprimirlistasimbolos
-    % \imprimirsumario
+    \imprimirsumario
 
     % Elementos textuais.
     \textual
@@ -129,6 +129,7 @@
     \incluir{capitulos/artigos.tex}
     \incluir{capitulos/protocolo-experimental.tex}
     \incluir{capitulos/resultados.tex}
+    \incluir{capitulos/conclusao.tex}
 
     % Elementos pós-textuais.
     \postextual

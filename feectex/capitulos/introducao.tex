@@ -1,9 +1,5 @@
-% =====================================================================
-%  INTRODUÇÃO
-%  Importe com \input{introducao} a partir do seu .tex principal.
-%  As chaves \cite{} seguem o arquivo referencias.bib deste trabalho.
-% =====================================================================
-
+%!TeX root = ../principal.tex
+%!TeX encoding = utf-8
 \chapter{Introdução}
 \label{ch:introducao}
 As redes de cápsulas prometem equivariância. A propriedade vem da forma como a cápsula representa uma entidade: a orientação do vetor codifica a pose. Com a pose explícita, a rede aprende a relação entre as características detectadas nas cápsulas primárias. Dessa relação viria a resistência a rotações e a outras transformações ausentes do treinamento.
@@ -12,6 +8,8 @@ A promessa é de 2017. Desde então, augmentação e regularização deram aos m
 
 Para esclarecer essa dúvida, este trabalho compara três arquiteturas: Efficient-CapsNet, ResNet-18 e DeiT-Tiny. Treinamos as três do zero em CIFAR-10 e D-Fire, sob três regimes de augmentação (nenhuma, padrão, forte), três frações de dados (33\%, 66\%, 100\%) e três sementes.
 
-A comparação só é justa se nada além da arquitetura variar. As três usam os mesmos hiperparâmetros, as mesmas sementes e as mesmas partições. Comparamos sob dois orçamentos: mesmo número de épocas e mesmo tempo de treino.
+A comparação só é justa se nada além da arquitetura variar. As três usam os mesmos hiperparâmetros, as mesmas sementes, as mesmas partições e o mesmo número de épocas, e o custo de cada treino é reportado à parte.
 
-O teste da equivariância vem depois do treino. Avaliamos cada modelo sob transformações que ele nunca viu e medimos quanto da acurácia limpa cada arquitetura retém.
+O teste da equivariância vem depois do treino. Avaliamos cada modelo sob transformações que ele nunca viu e medimos quanto da acurácia limpa cada arquitetura preserva, em termos absolutos e acima do acaso.
+
+O trabalho está organizado da seguinte forma. O Capítulo~\ref{ch:revisao} revisa a literatura sobre cápsulas e a controvérsia sobre sua robustez. O Capítulo~\ref{cap3} descreve as três arquiteturas e as adaptações feitas em cada uma. O Capítulo~\ref{ch:protocol} detalha as perguntas de pesquisa, as hipóteses e o protocolo experimental. O Capítulo~\ref{ch:results} apresenta e discute os resultados, e o Capítulo~\ref{ch:conclusao} responde às perguntas e aponta trabalhos futuros.

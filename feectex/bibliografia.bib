@@ -1,73 +1,7 @@
-@inproceedings{sabour2017dynamic,
-  title     = {Dynamic Routing Between Capsules},
-  author    = {Sabour, Sara and Frosst, Nicholas and Hinton, Geoffrey E},
-  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
-  year      = {2017}
-}
-
-@article{mazzia2021efficient,
-  title     = {Efficient-CapsNet: Capsule Network with Self-Attention Routing},
-  author    = {Mazzia, Vittorio and Salvetti, Francesco and Chiaberge, Marcello},
-  journal   = {Scientific Reports},
-  volume    = {11},
-  number    = {1},
-  pages     = {14634},
-  year      = {2021},
-  publisher = {Nature Publishing Group},
-  doi       = {10.1038/s41598-021-93977-0}
-}
-
-@inproceedings{he2016deep,
-  title     = {Deep Residual Learning for Image Recognition},
-  author    = {He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
-  booktitle = {Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
-  pages     = {770--778},
-  year      = {2016}
-}
-
-@inproceedings{dosovitskiy2021image,
-  title     = {An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale},
-  author    = {Dosovitskiy, Alexey and Beyer, Lucas and Kolesnikov, Alexander and Weissenborn, Dirk and Zhai, Xiaohua and Unterthiner, Thomas and Dehghani, Mostafa and Minderer, Matthias and Heigold, Georg and Gelly, Sylvain and Uszkoreit, Jakob and Houlsby, Neil},
-  booktitle = {International Conference on Learning Representations (ICLR)},
-  year      = {2021}
-}
-
-@inproceedings{touvron2021training,
-  title     = {Training Data-Efficient Image Transformers \& Distillation through Attention},
-  author    = {Touvron, Hugo and Cord, Matthieu and Douze, Matthijs and Massa, Francisco and Sablayrolles, Alexandre and J{\'e}gou, Herv{\'e}},
-  booktitle = {International Conference on Machine Learning (ICML)},
-  pages     = {10347--10357},
-  year      = {2021},
-  volume    = {139},
-  series    = {Proceedings of Machine Learning Research},
-  publisher = {PMLR}
-}
-
-@article{alex2009learning,
-  title={Learning multiple layers of features from tiny images},
-  author={Alex, Krizhevsky},
-  journal={https://www. cs. toronto. edu/kriz/learning-features-2009-TR. pdf},
-  year={2009}
-}
-
-@article{lecun2010mnist,
-  title={MNIST handwritten digit database},
-  author={LeCun, Yann and Cortes, Corinna and Burges, CJ},
-  journal={ATT Labs [Online]. Available: http://yann.lecun.com/exdb/mnist},
-  volume={2},
-  year={2010}
-}
-
-@online{ptflops,
-  author = {Vladislav Sovrasov},
-  title = {ptflops: a flops counting tool for neural networks in pytorch framework},
-  year = {2018-2024},
-  url = {https://github.com/sovrasov/flops-counter.pytorch},
-}
-
 % =====================================================================
-%  Referências do capítulo de Revisão da Literatura
-%  Compatível com bibtex e biblatex.
+%  Bibliografia
+%  Uma entrada por obra. Chaves usadas no texto:
+%    sabour2017dynamic, hinton2018matrix, mazzia2021efficient, ...
 % =====================================================================
 
 % ---------- Redes de cápsulas ----------
@@ -270,6 +204,15 @@
   year        = {2009},
 }
 
+@article{lecun2010mnist,
+  title   = {{MNIST} handwritten digit database},
+  author  = {LeCun, Yann and Cortes, Corinna and Burges, Christopher J. C.},
+  journal = {AT\&T Labs},
+  url     = {http://yann.lecun.com/exdb/mnist},
+  volume  = {2},
+  year    = {2010},
+}
+
 @article{venancio2022dfire,
   author  = {de Ven{\^a}ncio, Pedro Vin{\'i}cius A. B. and Lisboa, Adriano C. and
              Barbosa, Adriano V.},
@@ -294,4 +237,22 @@
   pages   = {10255},
   year    = {2025},
   doi     = {10.3390/app151810255},
+}
+
+% ---------- Software ----------
+
+@misc{ptflops,
+  author       = {Sovrasov, Vladislav},
+  title        = {ptflops: a {FLOPs} counting tool for neural networks in {PyTorch} framework},
+  url          = {https://github.com/sovrasov/flops-counter.pytorch},
+  urlaccessdate = {15 set. 2026},
+  year         = {2024},
+}
+
+@misc{wightman2019timm,
+  author       = {Wightman, Ross},
+  title        = {{PyTorch} Image Models},
+  url          = {https://github.com/huggingface/pytorch-image-models},
+  urlaccessdate = {15 set. 2026},
+  year         = {2019},
 }
