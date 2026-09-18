@@ -15,15 +15,23 @@ desse delineamento, é negativa para as duas promessas centrais das cápsulas.
 \section{Respostas às perguntas de pesquisa}
 \label{sec:conc:rq}
 
-\paragraph{RQ1 --- Equivariância.}
+\paragraph{RQ1 --- Robustez a transformações.}
 As cápsulas não degradam menos sob rotação. A retenção capsular sob rotação
 grande não supera a da ResNet-18 no CIFAR-10 ($+1{,}1$~pp, sem significância) e
 fica $1{,}5$~pp abaixo dela no D-Fire, diferença que não resiste à correção
-para múltiplas comparações. Em acurácia absoluta, a ResNet-18 fica à
+para múltiplas comparações ($p_{\text{Holm}} = 0{,}065$). Em acurácia absoluta, a ResNet-18 fica à
 frente sob rotação em todos os regimes com augmentação no CIFAR-10, com margem
 de até $8{,}6$~pp, maior que qualquer vantagem capsular observada na grade. Só
 no regime sem augmentação o Efficient-CapsNet fica à frente da ResNet-18 sob
-rotação, e por menos de $2$~pp em $f = 1{,}00$. H1 foi rejeitada.
+rotação, e por menos de $2$~pp em $f = 1{,}00$. H1 não foi sustentada neste
+protocolo; a evidência em sentido contrário vem da acurácia absoluta sob
+rotação, e não da retenção, que é apenas indistinguível de zero
+($p_{\text{Holm}} = 0{,}22$ no CIFAR-10, $0{,}065$ no D-Fire).
+
+Vale repetir o alcance da afirmação: o que não se sustentou foi a previsão de
+maior robustez da classificação quando as linhas de base recebem augmentação.
+A equivariância das representações capsulares não foi medida, e nada aqui a
+refuta diretamente.
 
 \paragraph{RQ2 --- Eficiência de dados.}
 A direção prevista aparece: o Efficient-CapsNet perde um pouco menos de
@@ -31,16 +39,35 @@ acurácia ao passar de $100\%$ para $33\%$ dos dados, cerca de $1$~pp a menos
 que a ResNet-18 nos dois conjuntos. A diferença não é significativa com três
 sementes e não altera o ordenamento absoluto em nenhuma fração: no CIFAR-10
 com augmentação forte, a ResNet-18 treinada com um terço dos dados já supera o
-modelo capsular treinado com todos eles. H2 não foi sustentada.
+modelo capsular treinado com todos eles. H2 não foi sustentada neste protocolo
+($p_{\text{Holm}} = 0{,}27$ nos dois conjuntos), e o poder disponível não
+permite afirmar que seja falsa. Pelo critério de dados necessários para um
+alvo, aliás, ela aparece no D-Fire sem augmentação: o Efficient-CapsNet atinge
+$87{,}7\%$ de acurácia limpa com cerca de $40\%$ dos dados, e a ResNet-18
+precisa de cerca de $59\%$.
 
 \paragraph{RQ3 --- Interação com augmentação.}
-Não há vantagem capsular para a augmentação absorver. Ao contrário, a
-augmentação amplia a distância: no CIFAR-10, em média sobre as frações, a
-desvantagem do Efficient-CapsNet em dados limpos passa de $2{,}5$~pp sem augmentação para
-$8{,}8$~pp com augmentação padrão e $13{,}2$~pp com augmentação forte. A
-tolerância a transformações que se atribuía à arquitetura capsular é obtida
-pelas linhas de base a partir dos dados, e com mais eficácia. H3 foi rejeitada,
-com o sinal invertido.
+H3 previa que os efeitos de H1 e H2 encolheriam ao nível do ruído sob
+augmentação forte, e é o que se observa nos quatro casos. A diferença de
+retenção sob rotação contra a ResNet-18 passa de $+5{,}6$ a $-2{,}0$~pp no
+CIFAR-10 e de $-3{,}5$ a $+1{,}4$~pp no D-Fire; a diferença de $\Delta_f$, de
+$-2{,}2$ a $0{,}0$~pp e de $-3{,}9$ a $+0{,}7$~pp. Em módulo, a redução vai de
+$60\%$ a $99\%$. H3 foi sustentada.
+
+O caso do CIFAR-10 sem augmentação é o mais informativo de todo o trabalho: ali
+o modelo capsular retém $5{,}6$~pp a mais de acurácia sob rotação que a
+ResNet-18, e a augmentação elimina essa diferença. A vantagem que a literatura
+capsular descreve aparece, portanto, exatamente onde a comparação histórica a
+media --- contra linhas de base sem augmentação --- e deixa de aparecer quando
+as linhas de base recebem o tratamento que hoje é padrão.
+
+Separadamente, e sem que isso constitua um teste de H3, a distância em acurácia
+limpa cresce com a augmentação: no CIFAR-10, em média sobre as frações, ela vai
+de $4{,}0$~pp sem augmentação a $5{,}9$~pp com augmentação padrão e $10{,}4$~pp
+com augmentação forte. A ResNet-18 converte augmentação em acurácia melhor que
+as outras duas arquiteturas. Como o delineamento confunde arquitetura e função
+objetivo (Seção~\ref{sec:protocol:threats}), o efeito não é atribuível à
+arquitetura isoladamente.
 
 % ---------------------------------------------------------------------
 \section{O que as cápsulas oferecem}
@@ -50,10 +77,13 @@ Três resultados favorecem o modelo capsular, e nenhum deles é sobre
 equivariância. O Efficient-CapsNet é a arquitetura mais estável entre sementes
 nos dois conjuntos, com amplitude média de $0{,}91$~pp no CIFAR-10, contra
 $1{,}42$~pp da ResNet-18 e $3{,}95$~pp do DeiT-Tiny. Em dados limpos, a norma
-das cápsulas de saída é um bom indicador dos próprios erros, com AUROC de até
-$0{,}856$. E, na tarefa binária do D-Fire, a distância para a melhor linha de
-base cai para $0{,}8$ a $3{,}4$~pp, contra até $13{,}2$~pp no CIFAR-10, com um
-modelo cujo extrator tem dezenas de vezes menos parâmetros.
+das cápsulas de saída ordena bem acertos e erros, com AUROC de até
+$0{,}856$ --- uma propriedade de discriminação, não de
+calibração~\cite{guo2017calibration}. E, na tarefa binária do D-Fire, a distância para a ResNet-18 vai de
+$+0{,}8$~pp (sem augmentação) a $-3{,}3$~pp (forte), contra $-4{,}0$ a
+$-10{,}4$~pp no CIFAR-10, com um caminho de classificação de cerca de
+$0{,}16$~M parâmetros contra $11{,}2$~M da ResNet-18. O modelo capsular
+completo, com o decodificador de reconstrução, tem $3{,}85$~M parâmetros.
 
 Esses resultados sugerem que o valor atual das cápsulas, se existe, está em
 modelos pequenos e estáveis para tarefas simples, e não na robustez a
@@ -105,14 +135,50 @@ justa com todos. Por fim, estender a comparação a outras formulações de
 cápsulas e a redes equivariantes por construção indicaria se o resultado é
 próprio do Efficient-CapsNet ou da ideia de cápsula.
 
+Três extensões discriminam melhor as arquiteturas do que a grade atual, e
+deveriam vir antes das demais. A primeira é avaliar as seis corrupções
+\emph{separadamente}, e não apenas em composição: a composição satura os três
+modelos e destrói a informação comparativa, enquanto cada corrupção isolada
+mantém os modelos em faixa utilizável. A segunda é varrer a intensidade de cada
+corrupção em vários níveis, produzindo uma curva de degradação por arquitetura
+em vez de um ponto. A terceira é substituir a sonda de rotação agregada por uma
+varredura determinística do ângulo, com acurácia por ângulo. Esta última é a
+mais promissora: a vantagem capsular de $5{,}6$~pp sob rotação no regime sem
+augmentação mostra que existe um regime em que a diferença arquitetural
+aparece, e uma curva por ângulo diria em que faixa ela se concentra.
+
+Junto com essas curvas devem ser publicados exemplos visuais das imagens
+transformadas em cada nível de intensidade. Sem eles, não é possível
+distinguir uma queda de acurácia causada por falta de robustez de uma queda
+causada por uma transformação que removeu do quadro a informação necessária
+para classificar --- distinção especialmente relevante no D-Fire, onde a
+oclusão de $25\%$ da área pode cobrir a própria região de fogo ou fumaça.
+
 % ---------------------------------------------------------------------
 \section{Considerações finais}
 \label{sec:conc:final}
 
-O título pergunta se a CapsNet ainda vale a pena. Para quem busca robustez a
-transformações ou eficiência de dados em imagens naturais, a resposta deste
-trabalho é não: uma ResNet-18 com augmentação obtém mais das duas coisas. Para
-quem precisa de um modelo pequeno, estável entre execuções e competitivo em uma
-tarefa simples, as cápsulas continuam sendo uma opção razoável, desde que a
-escolha seja justificada por essas propriedades, e não pela promessa de
-equivariância.
+A pergunta que motivou o trabalho era se as cápsulas ainda oferecem robustez a
+transformações e eficiência de dados que as linhas de base não obtenham por
+augmentação. A resposta, restrita ao que foi medido --- uma implementação
+adaptada do Efficient-CapsNet, contra a ResNet-18 e o DeiT-Tiny, em CIFAR-10 e
+na versão binária do D-Fire, com hiperparâmetros herdados da referência
+capsular, três sementes e uma única magnitude de rotação ---, é que nenhuma das
+duas vantagens sobrevive à augmentação. Sem augmentação elas aparecem: o modelo
+capsular retém $5{,}6$~pp a mais de acurácia sob rotação no CIFAR-10 e atinge
+um alvo de acurácia com cerca de dois terços dos dados que a ResNet-18 precisa
+no D-Fire. Com augmentação forte, as duas diferenças somem, e a ResNet-18
+obtém mais acurácia limpa e mais acurácia absoluta sob rotação.
+
+Essa conclusão não se estende às redes de cápsulas em geral. Ela vale para esta
+formulação, nestes dois conjuntos, sob este protocolo. Outras formulações
+capsulares, outros regimes de treino e, sobretudo, uma comparação em que as
+linhas de base recebam a mesma função objetivo e cada arquitetura receba
+orçamento de busca de hiperparâmetros equivalente podem produzir um resultado
+diferente.
+
+Dentro do alcance avaliado, o que se sustenta a favor do modelo capsular é
+outra coisa: estabilidade entre execuções, boa discriminação dos próprios erros
+em distribuição e competitividade na tarefa binária com um caminho de
+classificação pequeno. Se houver motivo para escolher cápsulas hoje, é por
+essas propriedades.

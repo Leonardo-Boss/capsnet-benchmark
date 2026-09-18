@@ -22,9 +22,13 @@ avaliação sob transformações nunca vistas no treino.
 Três perguntas orientam o experimento.
 
 \begin{description}
-\item[RQ1 (Equivariância).]
+\item[RQ1 (Robustez a transformações).]
 As cápsulas degradam menos que os modelos convolucionais e de atenção sob
-transformações ausentes do treino, em particular sob grandes rotações?
+transformações ausentes do treino, em particular sob grandes rotações? A
+pergunta é sobre a robustez da \emph{classificação}, não sobre a equivariância
+das representações: testar equivariância exigiria comparar
+$\Phi(T_g x)$ com $T'_g \Phi(x)$~\cite{cohen2016group}, o que este protocolo
+não faz.
 \item[RQ2 (Eficiência de dados).]
 A diferença de acurácia entre as arquiteturas cresce a favor das cápsulas
 conforme a fração de dados de treino diminui?
@@ -136,11 +140,21 @@ frações. Todas as imagens são redimensionadas para $224\times224$ pixels, sem
 recorte, para não remover a região de fogo ou fumaça. Na partição de teste, a
 classe majoritária responde por $53{,}4\%$ das imagens.
 
-A validação do D-Fire passa apenas por redimensionamento e normalização. No
-CIFAR-10, as imagens de validação passam pelo mesmo \emph{pipeline} de
-augmentação do treino, de modo que a perda de validação usada na seleção do
-modelo é medida sobre imagens aumentadas no regime de cada execução
-(Seção~\ref{sec:protocol:threats}).
+Os dois conjuntos não tratam a validação da mesma forma. A validação do D-Fire
+passa apenas por redimensionamento e normalização. No CIFAR-10, as imagens de
+validação passam pelo mesmo \emph{pipeline} de augmentação do treino, de modo
+que a perda de validação usada na seleção do modelo é medida sobre imagens
+aumentadas no regime de cada execução.
+
+A assimetria afeta a seleção do \emph{checkpoint}, e não apenas o número
+reportado: no CIFAR-10 o critério seleciona o modelo que melhor generaliza
+para imagens aumentadas, e não para imagens limpas, e o efeito é maior quanto
+mais forte o regime. Ela é idêntica para as três arquiteturas, o que preserva o
+pareamento, mas pode penalizar de modo desigual arquiteturas que respondem de
+forma diferente à augmentação --- e a Seção~\ref{sec:res:aug} mostra que elas
+respondem. Uma análise de sensibilidade, reavaliando o \emph{checkpoint}
+selecionado por perda de validação limpa e comparando com o selecionado por
+perda aumentada, é reportada na Seção~\ref{sec:res:sensitivity}.
 
 \begin{table}[t]
   \centering
@@ -177,8 +191,12 @@ somam apenas cerca de $0{,}16$~M.
   \caption{Complexidade dos modelos. Parâmetros e operações de multiplicação e
   acumulação (MACs), contadas com a biblioteca \texttt{ptflops}~\citar{ptflops}
   em uma passagem direta com lote unitário, na resolução de entrada de cada
-  conjunto. Para o Efficient-CapsNet a contagem inclui o decodificador, que
-  também é executado na inferência.}
+  conjunto. Para o Efficient-CapsNet os valores incluem o decodificador de
+  reconstrução; o caminho de classificação sozinho tem cerca de $0{,}16$~M
+  parâmetros, e seu custo em MACs é reportado à parte.}
+% PREENCHER: medir com ptflops o modelo capsular com o decodificador desativado
+% e acrescentar as colunas de inferência sem reconstrução. As MACs precisam ser
+% medidas, não inferidas a partir da contagem de parâmetros.
   \label{tab:model-complexity}
   \begin{tabular}{lcccc}
     \toprule
@@ -248,13 +266,32 @@ interrompe o treino. A parada antecipada está desativada: todo treino roda as
 
 \subsection{Orçamento de comparação}
 \label{sec:protocol:budget}
-Todas as comparações deste trabalho são feitas com o mesmo número de épocas.
-Épocas iguais não significam custo igual: uma arquitetura mais lenta por época
-consome mais tempo para o mesmo número de passos. Por isso o custo de cada
-treino é reportado à parte, na Tabela~\ref{tab:cost}, e o leitor pode julgar
-se uma diferença de acurácia compensa uma diferença de tempo. Uma comparação
-com tempo de treino igual exigiria avaliar \emph{checkpoints} intermediários,
-e não foi realizada.
+Todas as comparações deste trabalho são feitas com o mesmo número de épocas e
+sob a mesma configuração de otimização. Isso define um protocolo comum, não uma
+condição igualmente favorável às três arquiteturas, por três razões.
+
+Primeiro, os hiperparâmetros da Tabela~\ref{tab:hyperparams} foram herdados da
+implementação de referência do Efficient-CapsNet, e nenhuma busca foi feita.
+Uma configuração escolhida para uma arquitetura tende a favorecê-la, e o
+resultado observado --- o Efficient-CapsNet fica atrás mesmo sob a configuração
+de sua própria referência --- é informativo apesar disso, mas não substitui o
+ajuste por arquitetura.
+
+Segundo, as funções objetivo diferem (Seção~\ref{sec:protocol:threats}). Não há
+como manter a configuração idêntica e, ao mesmo tempo, isolar a arquitetura da
+perda.
+
+Terceiro, épocas iguais não significam custo igual: uma arquitetura mais lenta
+por época consome mais tempo para o mesmo número de passos. O custo de cada
+treino é reportado à parte, na Tabela~\ref{tab:cost}. Uma comparação com tempo
+de treino igual exigiria avaliar \emph{checkpoints} intermediários, e não foi
+realizada.
+
+O experimento é, portanto, uma comparação sob configuração compartilhada. A
+comparação complementar --- uma busca de hiperparâmetros por arquitetura, com
+orçamento de avaliações equivalente para as três, e um regime de augmentação
+escolhido por arquitetura --- não foi executada e é o próximo passo natural
+(Seção~\ref{sec:conc:futuros}).
 
 \subsection{Hardware e tempo de execução}
 Os modelos foram treinados em uma RTX 2060 de 6\,GB de VRAM. O ambiente usa
@@ -428,6 +465,10 @@ A taxa de falsos negativos da classe \textsc{fire/smoke}, relevante para um
 detector de incêndio em operação, não é reportada: o objetivo aqui é comparar
 arquiteturas, e não avaliar um sistema de detecção.
 
+A AUROC de detecção de erro mede a capacidade de ordenar acertos acima de
+erros, e não a calibração da confiança. Métricas de calibração propriamente
+dita não são reportadas neste trabalho.
+
 \subsection{Robustez}
 Para uma corrupção $c$, a razão de retenção é
 \begin{equation}
@@ -442,14 +483,33 @@ degradação absoluta $A^{\text{clean}} - A^{c}$ e a habilidade retida $S_c$ da
 Equação~\eqref{eq:skill}, que desconta o acaso, são reportadas ao lado.
 
 \subsection{Eficiência de dados}
-A estatística de eficiência de dados é a queda de acurácia limpa entre as
-frações extremas:
+A estatística principal de eficiência de dados é a queda de acurácia limpa
+entre as frações extremas:
 \begin{equation}
   \Delta_{f} = A_{f=1{,}00} - A_{f=0{,}33}.
   \label{eq:data-eff}
 \end{equation}
-Com apenas três frações, a área sob a curva de acurácia contra fração não
-acrescenta informação sobre $\Delta_f$ e não é usada.
+
+$\Delta_f$ sozinho é ambíguo: uma queda pequena pode significar que o modelo
+aproveita bem poucos dados, mas também que ele já estava com desempenho baixo
+com todos eles, e portanto tinha pouco a perder. Por isso duas medidas
+complementares são reportadas ao lado:
+
+\begin{description}
+  \item[Acurácia ao mesmo volume.] A acurácia absoluta em cada fração,
+  comparada entre arquiteturas (Tabela~\ref{tab:res-clean}). É a leitura que
+  responde à pergunta prática: com $n$ imagens, qual modelo acerta mais?
+  \item[Dados para atingir um alvo.] A menor fração em que cada arquitetura
+  alcança um nível de acurácia fixado, por interpolação linear entre as
+  frações avaliadas. Um modelo mais eficiente em dados atinge o alvo com
+  fração menor. O alvo é fixado em $7$~pp abaixo da melhor acurácia limpa
+  observada no conjunto.
+\end{description}
+
+A área sob a curva de acurácia contra fração também é reportada. Com três
+frações ela não é redundante com $\Delta_f$: os dois extremos fixam apenas as
+pontas, e a fração intermediária pode deslocar a área sem alterar
+$\Delta_f$. Ela capta, portanto, a curvatura que $\Delta_f$ ignora.
 
 \subsection{Custo computacional}
 O custo de inferência está na Tabela~\ref{tab:model-complexity}. O custo de
@@ -482,10 +542,15 @@ GPU.
 \end{table}
 
 No D-Fire, as três arquiteturas levam praticamente o mesmo tempo por época,
-embora difiram em até quatro vezes no custo de inferência. O tempo desse
-conjunto é dominado pela leitura e decodificação das imagens JPEG, feita por um
-único processo auxiliar, e não pela rede. Os tempos do D-Fire, portanto, não
-medem o custo das arquiteturas; os do CIFAR-10, sim.
+embora difiram em até quatro vezes no custo de inferência. A explicação mais
+provável é que o tempo desse conjunto seja dominado pela leitura e decodificação
+das imagens JPEG, feita por um único processo auxiliar, e não pela rede.
+% PREENCHER: medir. Uma execução com os dados já decodificados em memória, ou
+% com o número de workers variado, separa o custo de E/S do custo da rede.
+% Reportar a fração do tempo de época gasta fora do passo de treino.
+Enquanto essa medição não for feita, os tempos do D-Fire não devem ser lidos
+como custo das arquiteturas. Os do CIFAR-10, onde o conjunto cabe em memória,
+não sofrem dessa limitação.
 
 % ---------------------------------------------------------------------
 \section{Análise estatística}
@@ -496,25 +561,65 @@ sementes. Com $n = 3$, o desvio padrão é uma estimativa fraca, e por isso a
 variabilidade também é reportada como amplitude entre sementes
 (Seção~\ref{sec:res:seeds}).
 
-As comparações entre arquiteturas usam o teste $t$ pareado. O pareamento é por
-semente, e, quando uma hipótese agrega várias condições, por semente e
-condição: as três arquiteturas compartilham sementes, partições e fluxo de
-augmentação (Seção~\ref{sec:protocol:repro}), e o pareamento remove essa fonte
-comum de variação. Um teste não paramétrico foi descartado porque, com três
-pares, o teste de Wilcoxon não pode produzir $p < 0{,}25$. O nível de
-significância é $\alpha = 0{,}05$.
+\subsection{Unidade de análise}
+\label{sec:protocol:stats:unit}
 
-As hipóteses H1 e H2 são julgadas por seis comparações pareadas: retenção sob
-rotação contra cada linha de base nos dois conjuntos, e $\Delta_f$ contra a
-ResNet-18 nos dois conjuntos. Com a correção de Holm sobre essas seis
-comparações, as diferenças contra o DeiT-Tiny continuam significativas
-($p_{\text{Holm}} < 10^{-11}$). A desvantagem capsular sob rotação no D-Fire
-passa de $p = 0{,}013$ para $p_{\text{Holm}} = 0{,}052$, e as demais ficam
-entre $0{,}24$ e $0{,}26$. O veredito de nenhuma hipótese muda com a
-correção, mas a afirmação de que a retenção capsular é \emph{menor} que a da
-ResNet-18 no D-Fire deixa de ser estatisticamente significativa e deve ser
-lida como tendência. As comparações célula a célula da
-Seção~\ref{sec:res:wins} são descritivas e não recebem teste.
+A quantidade testada é sempre uma \emph{diferença pareada}: para uma condição
+$k$ (combinação de conjunto, regime de augmentação, fração de dados e condição
+de teste) e uma semente $s$, define-se
+\begin{equation}
+  d_{k,s} = m_{k,s}^{\text{caps}} - m_{k,s}^{\text{base}},
+  \label{eq:paired-diff}
+\end{equation}
+onde $m$ é a métrica em questão. O pareamento por semente é legítimo: as três
+arquiteturas compartilham a semente, a partição de validação, a subamostragem
+da fração e o fluxo de augmentação (Seção~\ref{sec:protocol:repro}), de modo
+que $d_{k,s}$ elimina essa fonte comum de variação.
+
+O que \emph{não} é legítimo é tratar as $d_{k,s}$ de condições diferentes como
+observações independentes. Duas células que partilham a mesma semente partilham
+a mesma partição de validação e os mesmos pesos iniciais; duas células que
+partilham a mesma fração de dados partilham o mesmo subconjunto de treino. As
+27 diferenças do CIFAR-10 em H1 e as nove de H2 são, portanto, réplicas
+correlacionadas, não amostras independentes.
+
+Por isso a inferência é feita em dois níveis, e o veredito repousa no primeiro:
+
+\begin{description}
+  \item[Nível da semente (teste principal).] As diferenças são primeiro
+  agregadas dentro de cada semente,
+  $\bar d_{s} = \frac{1}{K}\sum_{k} d_{k,s}$, e o teste $t$ pareado é aplicado
+  às três médias resultantes ($n = 3$, $\nu = 2$). É o teste com a unidade
+  experimental correta, e é deliberadamente conservador: com três sementes, só
+  detecta efeitos grandes e consistentes.
+  \item[Nível da célula (modelo misto, sensibilidade).] Um modelo linear misto
+  ajusta $d_{k,s} \sim 1 + (1\,|\,\text{semente}) + (1\,|\,\text{fração})$,
+  com o regime de augmentação como efeito fixo quando a hipótese envolve
+  augmentação. O intercepto estima a diferença média e os interceptos
+  aleatórios absorvem a dependência entre condições.
+\end{description}
+
+As diferenças por célula continuam sendo reportadas, com intervalo de
+confiança, como estatística descritiva. O teste $t$ sobre as 27 (ou nove)
+diferenças tomadas como independentes \emph{não} é usado: ele trata condição
+como réplica e subestima o erro-padrão. Um teste não paramétrico foi descartado
+porque, com três sementes, o teste de Wilcoxon não pode produzir
+$p < 0{,}25$. O nível de significância é $\alpha = 0{,}05$.
+
+\subsection{Múltiplas comparações}
+
+As hipóteses H1 e H2 são julgadas por seis comparações pareadas, fixadas antes
+da análise: a retenção sob rotação contra cada linha de base nos dois
+conjuntos, e $\Delta_f$ contra a ResNet-18 nos dois conjuntos. A correção de
+Holm é aplicada a essas seis, e \emph{todo} valor de $p$ citado no texto, nas
+tabelas e na conclusão é o valor corrigido, identificado como
+$p_{\text{Holm}}$. As diferenças contra o DeiT-Tiny permanecem significativas
+($p_{\text{Holm}} < 10^{-11}$); a desvantagem capsular sob rotação no D-Fire
+fica em $p_{\text{Holm}} = 0{,}052$, e as demais entre $0{,}24$ e $0{,}26$.
+As comparações célula a célula da Seção~\ref{sec:res:wins} são descritivas e
+não recebem teste.
+% PREENCHER: recalcular os p no nível da semente e pelo modelo misto com o
+% script reanalise_estatistica.py e substituir os valores acima.
 
 % ---------------------------------------------------------------------
 \section{Reprodutibilidade}
@@ -531,7 +636,21 @@ mesmos lotes aumentados na mesma ordem, ao menos no início do treino.
 
 Essa propriedade foi verificada reexecutando o procedimento de inicialização de
 cada arquitetura, sem treinar, e comparando o \emph{hash} SHA-256 dos primeiros
-lotes de treino.
+lotes de treino. A verificação cobre o início do treino, e não garante, por si
+só, que os lotes permaneçam idênticos ao longo das 100 épocas.
+
+A avaliação recebe um controle mais forte, porque é dela que saem os números
+comparados. As transformações de teste com componente aleatório --- o ângulo da
+sonda de rotação, a posição da oclusão, o ruído gaussiano e o
+\emph{pipeline} de augmentação em teste --- são sorteadas a partir de um
+gerador semeado pelo identificador da imagem, e não pela ordem de avaliação.
+Cada imagem recebe, assim, exatamente a mesma transformação nas três
+arquiteturas, em qualquer ordem de execução. Os parâmetros sorteados por imagem
+são gravados junto às predições, o que permite verificar o pareamento
+\emph{a posteriori} e refazer qualquer avaliação.
+% VERIFICAR: confirmar que a semente das transformações de teste é derivada do
+% índice da imagem e não do estado global do DataLoader. Se não for, este é o
+% ajuste de código mais importante da lista.
 % VERIFICAR: confirmar em paper_info/aug_determinism.csv que os hashes
 % coincidem entre as três arquiteturas nos dois conjuntos.
 
@@ -545,7 +664,13 @@ A tarefa de classificação usada no D-Fire não é a distribuída pelos autores
 Seção~\ref{sec:protocol:dfire} e a lista de arquivos com o rótulo e a partição
 de cada imagem acompanham o código, junto com as configurações, em
 \url{https://URL-DO-REPOSITORIO}.
-% PREENCHER: endereço público do código.
+% PREENCHER: endereço público do código, tag e hash do commit.
+
+O repositório contém as configurações YAML de todas as 162 execuções, a lista
+de arquivos com rótulo e partição de cada imagem, as predições por imagem de
+todas as 972 avaliações, os \emph{scripts} que produzem cada tabela e figura
+do Capítulo~\ref{ch:results} e a \emph{tag} de versão do código usada nos
+experimentos (\texttt{vX.Y}, \emph{commit} XXXXXXX).
 
 % ---------------------------------------------------------------------
 \section{Ameaças à validade}

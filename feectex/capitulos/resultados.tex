@@ -83,7 +83,7 @@ estável em toda a grade e não depende da fração de dados.
 \end{table}
 
 No CIFAR-10 a ResNet-18 vence em todas as nove combinações de fração e
-augmentação, com margem entre $4{,}4$ e $10{,}5$ pontos percentuais (pp) sobre o
+augmentação, com margem entre $2{,}3$ e $10{,}8$ pontos percentuais (pp) sobre o
 Efficient-CapsNet. O melhor resultado capsular ($84{,}8\%$, augmentação padrão,
 $f = 1{,}00$) fica $8{,}5$~pp abaixo do melhor resultado convolucional
 ($93{,}3\%$). O DeiT-Tiny é o pior dos três por larga margem, o que é esperado:
@@ -92,10 +92,12 @@ de $32\times32$, operam muito abaixo do seu regime.
 
 No D-Fire o quadro é diferente. A tarefa é binária e mais fácil, e o
 Efficient-CapsNet fica a $1{,}1$~pp da ResNet-18 na melhor configuração de cada
-um ($93{,}6\%$ contra $94{,}7\%$). Em duas células --- augmentação nenhuma com
-$f = 0{,}33$ e $f = 0{,}66$, e augmentação padrão com $f = 0{,}33$ --- o modelo
-capsular tem a maior média, mas nenhuma dessas vantagens excede o dobro do
-ruído entre sementes.
+um ($93{,}6\%$ contra $94{,}7\%$). Em quatro células --- augmentação nenhuma e augmentação padrão, ambas com
+$f = 0{,}33$ e $f = 0{,}66$ --- o modelo capsular tem a maior média. Só a
+primeira é apreciável ($+2{,}9$~pp); as outras três são de $+0{,}5$, $+0{,}2$ e
+$+0{,}1$~pp, todas dentro do dobro do desvio padrão entre sementes.
+% VERIFICAR: confirmar nas médias sem arredondamento se as duas células de
+% augmentação padrão realmente ficam a favor do modelo capsular.
 
 Duas observações estruturais valem o registro. A primeira: a ResNet-18 é a
 única arquitetura que melhora ao subir de augmentação padrão para forte.
@@ -175,13 +177,16 @@ $51{,}4\%$ do Efficient-CapsNet. A vantagem convolucional sob rotação
 que qualquer vantagem capsular observada em toda a grade.
 
 Apenas no regime sem augmentação nenhuma o Efficient-CapsNet fica à frente sob
-rotação, e por pouco: $38{,}1\%$ contra $36{,}4\%$ da ResNet-18. Em teste
-pareado por semente sobre todas as 27 células do CIFAR-10, a diferença de
-retenção entre Efficient-CapsNet e ResNet-18 sob rotação é de $+1{,}1$~pp com
-$p = 0{,}13$ --- indistinguível de zero. No D-Fire a mesma comparação dá
-$-1{,}5$~pp com $p = 0{,}013$, ou seja, uma desvantagem capsular
-estatisticamente detectável. Contra o DeiT-Tiny a diferença de retenção é de
-$-15{,}1$~pp no CIFAR-10 e $-11{,}7$~pp no D-Fire, ambas com $p < 10^{-12}$.
+rotação, e por pouco: $38{,}1\%$ contra $36{,}4\%$ da ResNet-18. Agregando as
+27 células do CIFAR-10 dentro de cada semente e comparando as três médias
+resultantes (Seção~\ref{sec:protocol:stats:unit}), a diferença de retenção
+entre Efficient-CapsNet e ResNet-18 sob rotação é de $+1{,}1$~pp, com IC 95\%
+de $-0{,}3$ a $+2{,}4$ e $p_{\text{Holm}} = 0{,}22$: indistinguível de zero. No
+D-Fire a mesma comparação dá $-1{,}5$~pp, com IC 95\% de $-2{,}3$ a $-0{,}7$ e
+$p_{\text{Holm}} = 0{,}065$ --- uma desvantagem consistente nas três sementes,
+que ainda assim não atinge o nível de significância adotado. Contra o DeiT-Tiny
+a diferença é de $-15{,}1$~pp no CIFAR-10 ($p_{\text{Holm}} = 0{,}012$) e
+$-11{,}7$~pp no D-Fire ($p_{\text{Holm}} = 0{,}001$).
 
 A Figura~\ref{fig:res-dumbbell} torna o padrão visível: as barras do
 Efficient-CapsNet e da ResNet-18 partem de pontos diferentes e caem
@@ -200,20 +205,34 @@ aproximadamente na mesma proporção, sem que a distância entre elas se feche.
 \subsection{A composição de todas as transformações é um piso, não uma medida}
 \label{sec:res:floor}
 
-Sob a composição das seis corrupções, os três modelos deixam de funcionar. No
-CIFAR-10 a acurácia cai para a faixa de $11{,}1\%$ a $19{,}1\%$, contra
-$10{,}0\%$ de acaso, em todas as 54 células. No D-Fire os valores ficam entre
-$-2{,}2$ e $+7{,}8$~pp da linha de base da classe majoritária ($53{,}4\%$); sem
-augmentação de treino, 14 das 18 células ficam \emph{abaixo} dela, isto é,
-perde para um classificador que ignora a imagem
-(Figura~\ref{fig:res-baselines}).
+Sob a composição das seis corrupções, os três modelos perdem quase toda a
+capacidade de discriminar. No CIFAR-10 a acurácia cai para a faixa de
+$11{,}1\%$ a $19{,}1\%$, contra $10{,}0\%$ de acaso, em todas as 54 células.
+Nenhuma dessas células fica \emph{no} acaso em sentido estrito: com 10.000
+imagens de teste o erro-padrão da acurácia é de cerca de $0{,}5$~pp, e o
+extremo superior da faixa está dezoito erros-padrão acima da referência. O que
+se afirma aqui, portanto, não é ausência total de informação, e sim que o
+desempenho é baixo demais para uso e as diferenças são pequenas demais para
+sustentar comparações entre arquiteturas. O que se afirma
+aqui, portanto, não é ausência total de informação, e sim que o desempenho é
+baixo demais para uso e pequeno demais para sustentar comparações entre
+arquiteturas. No D-Fire os valores ficam entre
+$-2{,}2$ e $+7{,}8$~pp da linha de base da classe majoritária ($53{,}4\%$), e
+16 das 54 células ficam \emph{abaixo} dela, isto é, perdem para um
+classificador que ignora a imagem (Figura~\ref{fig:res-baselines}).
+% VERIFICAR: a reanálise conta 16 de 54 células abaixo da classe majoritária no
+% total. Confirmar quantas dessas estão no regime sem augmentação de treino
+% antes de reescrever a frase como "14 das 18".
 
 Isso muda o que se pode concluir a partir dessa condição. Comparar retenção
 entre modelos que estão todos no nível do acaso compara padrões de colapso, não
 robustez. As diferenças de $R_c$ que aparecem ali --- $26{,}9\%$ para o
 DeiT-Tiny contra $14{,}7\%$ para a ResNet-18, por exemplo --- correspondem, em
-acurácia absoluta, a $16{,}4\%$ contra $11{,}6\%$: quatro pontos e meio acima e
-um ponto e meio acima do acaso, respectivamente. Nenhum dos dois é utilizável.
+acurácia absoluta, a $16{,}4\%$ contra $11{,}6\%$, ou seja, $6{,}4$~pp e
+$1{,}6$~pp acima do acaso. A diferença entre os dois é real e mensurável; o que
+não se sustenta é tratá-la como diferença de robustez, porque nenhum dos dois
+modelos é utilizável nessa condição e a razão $R_c$ ali compara padrões de
+colapso.
 
 \begin{figure}[t]
   \centering
@@ -272,6 +291,14 @@ eixos é $+0{,}68$, e sob todas as transformações ela \emph{inverte} de sinal
 Por isso a Tabela~\ref{tab:res-robust} reporta $A^c$ em primeiro lugar, e por
 isso H1 é avaliada sobre acurácia absoluta e sobre retenção pareada por
 semente, não sobre médias de $R_c$.
+
+\subsection{Sensibilidade ao critério de seleção do modelo}
+\label{sec:res:sensitivity}
+
+% PREENCHER: reavaliar, para o CIFAR-10, o checkpoint de menor perda de
+% validação limpa e comparar as tabelas principais com as obtidas pelo
+% critério aumentado. Reportar a diferença máxima em pp e dizer se algum
+% veredito muda.
 
 % ---------------------------------------------------------------------
 \section{Colapso de predição e detecção de erro}
@@ -335,16 +362,25 @@ cai para $0{,}707$--$0{,}766$ no CIFAR-10 e para $0{,}581$ no D-Fire sem
 augmentação --- neste último caso, com $77{,}6\%$ das predições em uma única
 classe. Ou seja: o modelo rotacionado no D-Fire responde quase sempre a mesma
 coisa e não sabe que está errando. Sob todas as transformações, a AUROC dos
-três modelos fica entre $0{,}515$ e $0{,}618$, praticamente o acaso
-(Figura~\ref{fig:res-auroc}). A falha, nessa condição, é silenciosa em todas as
-arquiteturas.
+três modelos fica entre $0{,}486$ e $0{,}636$ (Figura~\ref{fig:res-auroc}). O
+extremo inferior está \emph{abaixo} do acaso: há configurações em que a
+confiança do modelo é levemente anticorrelacionada com o acerto. Nenhum valor
+da faixa é utilizável como sinal de falha, e as diferenças entre arquiteturas
+nessa condição não são interpretáveis como diferenças de robustez
+(Seção~\ref{sec:res:floor}). A falha, aqui, é praticamente silenciosa em todas
+as arquiteturas. O valor mais alto está acima do acaso, mas um
+detector com AUROC nessa faixa não tem utilidade prática como sinal de falha, e
+as diferenças entre arquiteturas nessa condição não são interpretáveis como
+diferenças de robustez (Seção~\ref{sec:res:floor}). A falha, nessa condição, é
+praticamente silenciosa em todas as arquiteturas.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{fig07_error_detection_auroc_cifar_10.png}
   \caption{CIFAR-10: AUROC da confiança como detector dos próprios erros. A
-  linha vermelha marca o acaso. Sob a composição de transformações, nenhum
-  modelo distingue acerto de erro.}
+  linha vermelha marca o acaso. Sob a composição de transformações, a
+  discriminação entre acerto e erro fica próxima do acaso em todos os modelos,
+  e em alguns casos abaixo dele.}
   \label{fig:res-auroc}
 \end{figure}
 
@@ -431,12 +467,31 @@ CIFAR-10 sob augmentação forte ($86{,}8\%$ contra $83{,}0\%$). Uma eventual
 inclinação mais suave da curva capsular não se converte em vantagem prática
 dentro da faixa investigada.
 
+A leitura de $\Delta_f$ isolada é ambígua, e as duas medidas complementares
+separam as duas leituras possíveis. No CIFAR-10 elas desfazem a vantagem
+aparente: o Efficient-CapsNet perde menos ao reduzir os dados em parte porque
+tem menos a perder --- sob augmentação forte ele parte de $83{,}0\%$ contra
+$93{,}3\%$ da ResNet-18 --- e, para o alvo de $86{,}3\%$, a ResNet-18 o atinge
+com $f = 0{,}33$ enquanto o modelo capsular não o atinge com nenhuma fração.
+Ao mesmo volume de dados, o ordenamento é o da Tabela~\ref{tab:res-clean}, com
+a ResNet-18 à frente nas nove combinações.
+
+No D-Fire o quadro se inverte no regime sem augmentação, e essa é a evidência
+mais concreta a favor de H2 em todo o trabalho: para o alvo de $87{,}7\%$, o
+Efficient-CapsNet precisa de cerca de $40\%$ dos dados e a ResNet-18 de cerca
+de $59\%$. A área sob a curva de acurácia contra fração acompanha ($88{,}98$
+contra $88{,}25$). A vantagem não sobrevive à augmentação: sob os regimes
+padrão e forte, ambas as arquiteturas atingem o alvo já em $f = 0{,}33$.
+% PREENCHER: acrescentar à Tabela~\ref{tab:res-dataeff} as colunas de área sob
+% a curva e de fração necessária para o alvo, produzidas por
+% reanalise_estatistica.py.
+
 A Figura~\ref{fig:res-scaling} mostra também um efeito que $\Delta_f$ não
 captura: sob rotação grande, mais dados continuam ajudando a ResNet-18
 ($+4{,}9$~pp de $f = 0{,}33$ a $f = 1{,}00$ com augmentação forte), enquanto
 sob todas as transformações as curvas são planas ou levemente decrescentes para
 os três modelos. Dados adicionais compram acurácia em distribuição e sob
-deslocamento moderado; não compram nada no regime de colapso.
+deslocamento moderado; não produzem ganho mensurável no regime de colapso.
 
 \begin{figure}[t]
   \centering
@@ -478,8 +533,15 @@ condições do CIFAR-10. Sem augmentação e com $f = 0{,}33$, a diferença é d
 $-2{,}3$~pp em dados limpos e chega a $+2{,}3$~pp sob rotação, ambas dentro do
 dobro do ruído entre sementes. Com augmentação forte e $f = 1{,}00$, ela é de
 $-10{,}3$~pp em dados limpos e $-8{,}7$~pp sob rotação. Em média sobre as
-frações, a desvantagem capsular em dados limpos passa de $-2{,}5$~pp (sem
-augmentação) para $-8{,}8$ (padrão) e $-13{,}2$~pp (forte).
+frações, e restrita à avaliação sem augmentação em teste, a desvantagem
+capsular em acurácia limpa passa de $-4{,}0$~pp (sem augmentação de treino)
+para $-5{,}9$ (padrão) e $-10{,}4$~pp (forte). A mesma agregação no D-Fire dá
+$+0{,}8$, $0{,}0$ e $-3{,}3$~pp.
+
+A separação entre as duas colunas de avaliação importa aqui. Agregando também
+as células avaliadas com augmentação forte em teste, os mesmos três números
+viram $-2{,}5$, $-8{,}8$ e $-13{,}2$~pp. Essa segunda agregação não descreve
+desempenho em dados limpos, e não é a reportada.
 
 \begin{figure}[t]
   \centering
@@ -574,18 +636,22 @@ investigada.
 
 Somando as 108 condições de avaliação (2 conjuntos $\times$ 3 augmentações
 $\times$ 3 frações $\times$ 2 augmentações em teste $\times$ 3 transformações),
-a ResNet-18 vence em 57, o DeiT-Tiny em 33 e o Efficient-CapsNet em 18. Das 18
-vitórias capsulares, \emph{uma única} excede o dobro do ruído entre sementes:
-D-Fire, augmentação forte, $f = 1{,}00$, teste com augmentação forte e todas as
-transformações, $59{,}2\%$ contra $57{,}7\%$ da ResNet-18 --- e essa é
-justamente uma condição em que ambos os modelos estão a poucos pontos da linha
-de base da classe majoritária.
+a ResNet-18 vence em 57, o DeiT-Tiny em 33 e o Efficient-CapsNet em 18. Nenhuma das 18
+vitórias capsulares excede o dobro do desvio padrão entre sementes. A maior
+delas ocorre no D-Fire, augmentação forte, $f = 1{,}00$, teste com augmentação
+forte e todas as transformações ($59{,}2\%$ contra $57{,}7\%$ da ResNet-18) ---
+e essa é justamente uma condição em que ambos os modelos estão a poucos pontos
+da linha de base da classe majoritária.
+% VERIFICAR: o critério aqui é duas vezes o desvio padrão entre as três
+% sementes. O texto anterior usava a amplitude (máximo menos mínimo), que é um
+% limiar diferente. Padronizar o critério em todo o capítulo.
 
 A distribuição das vitórias também localiza os regimes. As 33 vitórias do
 DeiT-Tiny concentram-se sob deslocamento (18 delas na composição de todas as
 transformações no CIFAR-10, onde todos estão perto do acaso). As 57 vitórias da
 ResNet-18 concentram-se em dados limpos e sob rotação, isto é, nos regimes em
-que os números significam alguma coisa.
+que os três modelos permanecem acima das referências triviais por margem
+apreciável.
 
 % ---------------------------------------------------------------------
 \section{Veredito sobre as hipóteses}
@@ -594,38 +660,100 @@ que os números significam alguma coisa.
 \begin{table}[t]
   \centering
   \caption{Resumo da avaliação das hipóteses da
-  Seção~\ref{sec:protocol:hypotheses}.}
+  Seção~\ref{sec:protocol:hypotheses}. Os valores de $p$ são corrigidos por
+  Holm sobre as seis comparações pré-fixadas
+  (Seção~\ref{sec:protocol:stats}).}
   \label{tab:res-verdict}
   \small
   \begin{tabular}{l p{0.68\textwidth}}
     \toprule
     Hipótese & Veredito \\
     \midrule
-    H1 & \textbf{Rejeitada.} Sob rotação grande, a retenção capsular não supera
-    a da ResNet-18 no CIFAR-10 ($+1{,}1$~pp, $p = 0{,}13$) e é inferior no
-    D-Fire ($-1{,}5$~pp, $p = 0{,}013$). Em acurácia absoluta, a ResNet-18 está
-    à frente em seis das nove condições do CIFAR-10, incluindo as seis com
-    augmentação. \\
+    \begin{table}[t]
+  \centering
+  \caption{Resumo da avaliação das hipóteses da
+  Seção~\ref{sec:protocol:hypotheses}. Os valores de $p$ são corrigidos por
+  Holm sobre as seis comparações pré-fixadas (Tabela~\ref{tab:stats-holm}).}
+  \label{tab:res-verdict}
+  \small
+  \begin{tabular}{l p{0.68\textwidth}}
+    \toprule
+    Hipótese & Veredito \\
+    \midrule
+    H1 & \textbf{Não sustentada neste protocolo, com evidência parcial em
+    sentido contrário.} Sob rotação grande, a retenção capsular não supera a da
+    ResNet-18 no CIFAR-10 ($+1{,}1$~pp, $p_{\text{Holm}} = 0{,}22$) e fica
+    abaixo dela no D-Fire ($-1{,}5$~pp, $p_{\text{Holm}} = 0{,}065$). A
+    ausência de diferença detectável não demonstra equivalência: com três
+    sementes, o protocolo não distingue efeitos abaixo de cerca de $2$~pp. O
+    que constitui evidência contrária a H1 não é a retenção, e sim a acurácia
+    absoluta sob rotação, em que a ResNet-18 está à frente em todos os regimes
+    com augmentação no CIFAR-10, com margem de até $8{,}6$~pp. \\
     \addlinespace
-    H2 & \textbf{Não sustentada.} A direção prevista aparece ($\Delta_f$ menor
-    para as cápsulas em ambos os conjuntos), mas a diferença é de cerca de
-    $1$~pp e não atinge significância com três sementes
-    ($p = 0{,}080$ e $p = 0{,}139$). O ordenamento absoluto não se inverte em
-    nenhuma fração. \\
+    H2 & \textbf{Não sustentada neste protocolo.} A direção prevista aparece
+    ($\Delta_f$ menor para as cápsulas em ambos os conjuntos), mas a diferença
+    é de cerca de $1$~pp e não atinge significância
+    ($p_{\text{Holm}} = 0{,}27$ nos dois conjuntos). Nada aqui autoriza afirmar
+    que as cápsulas \emph{não} são mais eficientes em dados; autoriza apenas
+    dizer que a vantagem, se existe, é menor do que este delineamento
+    distingue. No D-Fire sem augmentação, aliás, ela é visível pelo critério de
+    dados necessários para um alvo (Seção~\ref{sec:res:data}). \\
     \addlinespace
-    H3 & \textbf{Rejeitada, com inversão de sinal.} Não há vantagem capsular a
-    encolher. A desvantagem em dados limpos no CIFAR-10 \emph{cresce} de
-    $-2{,}5$~pp sem augmentação para $-13{,}2$~pp sob augmentação forte. \\
+    H3 & \textbf{Sustentada.} H3 prevê que os efeitos de H1 e H2 encolham até o
+    nível do ruído sob augmentação forte, e é sobre eles que precisa ser
+    testada. Os quatro efeitos encolhem: a diferença de retenção sob rotação
+    contra a ResNet-18 passa de $+5{,}6$ a $-2{,}0$~pp no CIFAR-10 e de
+    $-3{,}5$ a $+1{,}4$~pp no D-Fire; a de $\Delta_f$, de $-2{,}2$ a $0{,}0$~pp
+    e de $-3{,}9$ a $+0{,}7$~pp. A redução em módulo vai de $60\%$ a $99\%$. O
+    caso mais nítido é o CIFAR-10 sem augmentação, onde existe uma vantagem
+    capsular de retenção de $5{,}6$~pp que a augmentação apaga --- precisamente
+    o mecanismo que H3 postulava. \\
+    \bottomrule
+  \end{tabular}
+\end{table} nem
+    no D-Fire ($-1{,}5$~pp, $p_{\text{Holm}} = 0{,}052$). A ausência de
+    diferença detectável não demonstra equivalência: com três sementes, o
+    protocolo não distingue efeitos abaixo de cerca de $2$~pp. O que constitui
+    evidência contrária a H1 não é a retenção, e sim a acurácia absoluta sob
+    rotação, em que a ResNet-18 está à frente em todos os regimes com
+    augmentação no CIFAR-10, com margem de até $8{,}6$~pp. \\
+    \addlinespace
+    H2 & \textbf{Não sustentada neste protocolo.} A direção prevista aparece
+    ($\Delta_f$ menor para as cápsulas em ambos os conjuntos), mas a diferença
+    é de cerca de $1$~pp e não atinge significância
+    ($p_{\text{Holm}} \approx 0{,}24$ e $0{,}26$). Nada aqui autoriza afirmar
+    que as cápsulas \emph{não} são mais eficientes em dados; autoriza apenas
+    dizer que a vantagem, se existe, é menor do que este delineamento
+    distingue, e que não altera o ordenamento absoluto em nenhuma fração. \\
+    \addlinespace
+    H3 & \textbf{Sustentada no componente de eficiência de dados, não
+    sustentada no de robustez.} H3 prevê que os efeitos de H1 e H2 encolham com
+    a augmentação, e é sobre eles que precisa ser testada. No componente H2 o
+    encolhimento ocorre: a diferença de $\Delta_f$ contra a ResNet-18 vai de
+    $-2{,}2$ a $0{,}0$~pp no CIFAR-10 e de $-3{,}9$ a $+0{,}7$~pp no D-Fire ao
+    subir de ``nenhuma'' a ``forte''. No componente H1 não há vantagem a
+    encolher em nenhum regime. O crescimento da distância em acurácia limpa
+    ($-4{,}0 \to -10{,}4$~pp) é um achado adicional e não é, por si só, um
+    teste de H3. \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-O achado central é negativo e deve ser enunciado sem atenuação: nesta grade,
-substituir camadas convolucionais por cápsulas com roteamento por
-autoatenção não compra robustez a transformações não vistas, nem eficiência de
-dados suficiente para compensar a perda de acurácia em distribuição. Onde o
-modelo capsular aparece à frente, ou a margem está dentro do ruído entre
-sementes, ou os modelos comparados estão no nível do acaso.
+O achado central é negativo e vale para o delineamento descrito: nesta grade,
+substituir camadas convolucionais por cápsulas com roteamento por autoatenção
+não produziu ganho líquido de robustez a transformações não vistas, e o ganho
+de eficiência de dados observado é menor do que a perda de acurácia em
+distribuição que o acompanha. Onde o modelo capsular aparece à frente, ou a
+margem está dentro do dobro do desvio padrão entre sementes, ou ambos os
+modelos comparados estão a poucos pontos de uma referência trivial.
+
+Há, porém, uma qualificação que os números impõem e que não pode ser omitida.
+No regime sem augmentação, o Efficient-CapsNet retém $5{,}6$~pp a mais de
+acurácia sob rotação que a ResNet-18 no CIFAR-10. A vantagem prevista pela
+literatura capsular existe, portanto, quando as linhas de base não recebem
+augmentação --- e desaparece quando recebem. O resultado deste trabalho não é
+que as cápsulas nunca tiveram a propriedade, e sim que ela deixou de ser
+distintiva.
 
 Três achados positivos sobrevivem à mesma análise, e nenhum deles é sobre
 equivariância:
@@ -636,14 +764,20 @@ semente nos dois conjuntos, com amplitude média de $0{,}91$~pp no CIFAR-10
 contra $1{,}42$ da ResNet-18 e $3{,}95$ do DeiT-Tiny
 (Seção~\ref{sec:res:seeds}).
 
-\item[Confiança calibrada em distribuição.] A norma do vetor de cápsula é um
-escore de detecção de erro competitivo ou superior ao \emph{softmax} em dados
-limpos, com AUROC de até $0{,}856$ no CIFAR-10 e $0{,}838$ no D-Fire
-(Seção~\ref{sec:res:collapse}).
+\item[Capacidade de discriminar acertos e erros em distribuição.] A norma do
+vetor de cápsula, usada como escore de confiança, separa acertos de erros tão
+bem quanto ou melhor que o \emph{softmax} em dados limpos, com AUROC de até
+$0{,}856$ no CIFAR-10 e $0{,}838$ no D-Fire
+(Seção~\ref{sec:res:collapse}). A AUROC mede apenas o ordenamento: ela não diz
+se a confiança declarada corresponde à frequência de acerto. Afirmar calibração
+exigiria comparar confiança e acerto por faixa, com diagramas de confiabilidade
+e erro de calibração esperado~\cite{guo2017calibration}, o que não foi feito
+aqui.
 
-\item[Competitividade na tarefa binária.] No D-Fire, a diferença para a melhor
-linha de base é de $0{,}8$--$3{,}4$~pp conforme o regime, contra
-$2{,}5$--$13{,}2$~pp no CIFAR-10. A penalidade capsular é fortemente dependente
+\item[Competitividade na tarefa binária.] No D-Fire, a diferença média para a
+ResNet-18 em acurácia limpa vai de $+0{,}8$~pp (sem augmentação) a $-3{,}3$~pp
+(forte), contra $-4{,}0$ a $-10{,}4$~pp no CIFAR-10. Em quatro das nove células
+do D-Fire o modelo capsular tem a maior média. A penalidade capsular é fortemente dependente
 da tarefa, o que sugere que conclusões obtidas apenas no CIFAR-10 não
 transferem.
 \end{description}

@@ -8,8 +8,29 @@ A promessa é de 2017. Desde então, augmentação e regularização deram aos m
 
 Para esclarecer essa dúvida, este trabalho compara três arquiteturas: Efficient-CapsNet, ResNet-18 e DeiT-Tiny. Treinamos as três do zero em CIFAR-10 e D-Fire, sob três regimes de augmentação (nenhuma, padrão, forte), três frações de dados (33\%, 66\%, 100\%) e três sementes.
 
-A comparação só é justa se nada além da arquitetura variar. As três usam os mesmos hiperparâmetros, as mesmas sementes, as mesmas partições e o mesmo número de épocas, e o custo de cada treino é reportado à parte.
+As três arquiteturas são comparadas sob uma configuração compartilhada: os
+mesmos hiperparâmetros, as mesmas sementes, as mesmas partições e o mesmo
+número de épocas, com o custo de cada treino reportado à parte. Configuração
+compartilhada não é o mesmo que condição igualmente adequada. Os
+hiperparâmetros vêm da implementação de referência do Efficient-CapsNet, as
+funções objetivo diferem --- perda de margem com reconstrução contra entropia
+cruzada --- e as capacidades não estão pareadas. O protocolo, portanto,
+responde a ``como estas três arquiteturas se comportam sob uma mesma
+configuração'', e não a ``qual arquitetura é melhor quando cada uma é ajustada
+ao seu melhor''. Essa distinção é retomada nas
+Seções~\ref{sec:protocol:budget} e~\ref{sec:protocol:threats}.
 
-O teste da equivariância vem depois do treino. Avaliamos cada modelo sob transformações que ele nunca viu e medimos quanto da acurácia limpa cada arquitetura preserva, em termos absolutos e acima do acaso.
+O que este trabalho mede, porém, é robustez, e não equivariância. Uma rede é
+equivariante a um grupo de transformações quando transformar a entrada
+corresponde a uma transformação previsível da representação interna,
+$\Phi(T_g x) = T'_g \Phi(x)$, na formulação de Cohen e
+Welling~\cite{cohen2016group}. Preservar a acurácia depois de uma
+transformação é uma consequência possível dessa propriedade, mas pode ser
+obtida por outros meios --- por invariância aprendida a partir de dados
+aumentados, por exemplo. Avaliamos cada modelo sob transformações que ele nunca
+viu e medimos quanto da acurácia limpa cada arquitetura preserva, em termos
+absolutos e acima do acaso. Isso caracteriza a robustez da classificação; a
+equivariância das representações internas não é medida aqui, e a distinção é
+mantida em todo o texto.
 
 O trabalho está organizado da seguinte forma. O Capítulo~\ref{ch:revisao} revisa a literatura sobre cápsulas e a controvérsia sobre sua robustez. O Capítulo~\ref{cap3} descreve as três arquiteturas e as adaptações feitas em cada uma. O Capítulo~\ref{ch:protocol} detalha as perguntas de pesquisa, as hipóteses e o protocolo experimental. O Capítulo~\ref{ch:results} apresenta e discute os resultados, e o Capítulo~\ref{ch:conclusao} responde às perguntas e aponta trabalhos futuros.
