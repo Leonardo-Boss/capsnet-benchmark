@@ -34,8 +34,11 @@
 \usepackage{multirow}
 
 % Impede que \paragraph receba número (causava "2.2.0.0.1" e "6.1.0.0.1").
-\setcounter{secnumdepth}{3}
-\setcounter{tocdepth}{2}
+% Precisa de \AtBeginDocument: a classe redefine secnumdepth depois do preâmbulo.
+\AtBeginDocument{%
+  \setcounter{secnumdepth}{3}%
+  \setcounter{tocdepth}{2}%
+}
 
 % Remove as molduras vermelhas dos links.
 \hypersetup{

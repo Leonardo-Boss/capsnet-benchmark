@@ -152,9 +152,10 @@ para imagens aumentadas, e não para imagens limpas, e o efeito é maior quanto
 mais forte o regime. Ela é idêntica para as três arquiteturas, o que preserva o
 pareamento, mas pode penalizar de modo desigual arquiteturas que respondem de
 forma diferente à augmentação --- e a Seção~\ref{sec:res:aug} mostra que elas
-respondem. Uma análise de sensibilidade, reavaliando o \emph{checkpoint}
-selecionado por perda de validação limpa e comparando com o selecionado por
-perda aumentada, é reportada na Seção~\ref{sec:res:sensitivity}.
+respondem. A análise de sensibilidade que resolveria a questão --- reavaliar o
+\emph{checkpoint} selecionado por perda de validação limpa e comparar com o
+selecionado por perda aumentada --- não foi executada, e a assimetria fica
+registrada como limitação (Seção~\ref{sec:res:threats}).
 
 \begin{table}[t]
   \centering
@@ -192,8 +193,10 @@ somam apenas cerca de $0{,}16$~M.
   acumulação (MACs), contadas com a biblioteca \texttt{ptflops}~\citar{ptflops}
   em uma passagem direta com lote unitário, na resolução de entrada de cada
   conjunto. Para o Efficient-CapsNet os valores incluem o decodificador de
-  reconstrução; o caminho de classificação sozinho tem cerca de $0{,}16$~M
-  parâmetros, e seu custo em MACs é reportado à parte.}
+  reconstrução; o caminho de classificação sozinho tem
+  cerca de $0{,}16$~M parâmetros, mas seu custo em MACs não foi medido
+  separadamente, de modo que as colunas GMACs não podem ser lidas como custo de
+  inferência sem reconstrução.}
 % PREENCHER: medir com ptflops o modelo capsular com o decodificador desativado
 % e acrescentar as colunas de inferência sem reconstrução. As MACs precisam ser
 % medidas, não inferidas a partir da contagem de parâmetros.
@@ -432,10 +435,10 @@ sobre esses ângulos. Uma varredura determinística em $\theta$ produziria uma
 curva por arquitetura; ela não foi feita, e a limitação é discutida na
 Seção~\ref{sec:res:threats}.
 
-No D-Fire, a rotação mede mais que equivariância. Chamas e plumas de fumaça
-sobem, e esse prior de orientação é informação útil para o classificador.
-Rotacionar a imagem quebra o prior, e a queda de acurácia mistura falta de
-equivariância com perda dessa pista.
+No D-Fire, a rotação mede mais que robustez a transformações. Chamas e plumas
+de fumaça sobem, e esse prior de orientação é informação útil para o
+classificador. Rotacionar a imagem quebra o prior, e a queda de acurácia mistura
+falta de robustez a rotação com perda dessa pista.
 
 \subsection{Avaliação sob augmentação em teste}
 Cada condição acima é avaliada duas vezes: sem augmentação em teste e com o
@@ -590,13 +593,25 @@ Por isso a inferência é feita em dois níveis, e o veredito repousa no primeir
   agregadas dentro de cada semente,
   $\bar d_{s} = \frac{1}{K}\sum_{k} d_{k,s}$, e o teste $t$ pareado é aplicado
   às três médias resultantes ($n = 3$, $\nu = 2$). É o teste com a unidade
-  experimental correta, e é deliberadamente conservador: com três sementes, só
-  detecta efeitos grandes e consistentes.
+  experimental correta, e é deliberadamente conservador: com três sementes,
+  nenhum valor de $p$ abaixo de cerca de $10^{-4}$ é alcançável, e só efeitos
+  grandes e consistentes entre sementes são detectados.
   \item[Nível da célula (modelo misto, sensibilidade).] Um modelo linear misto
-  ajusta $d_{k,s} \sim 1 + (1\,|\,\text{semente}) + (1\,|\,\text{fração})$,
-  com o regime de augmentação como efeito fixo quando a hipótese envolve
-  augmentação. O intercepto estima a diferença média e os interceptos
-  aleatórios absorvem a dependência entre condições.
+  ajusta $d_{k,s} \sim 1 + (1\,|\,\text{semente}) + (1\,|\,\text{fração})$, com
+  o intercepto testado contra $t$ de $n_{\text{sementes}} - 1$ graus de
+  liberdade. A referência normal, adotada por padrão nas implementações usuais,
+  é anticonservadora com três grupos: ela atribui $p < 10^{-4}$ a efeitos que a
+  referência correta situa na casa de $10^{-3}$. Dos seis ajustes, dois falham
+  por matriz singular --- em H2, $\Delta_f$ colapsa a fração e a variância
+  entre sementes é indistinguível de zero --- e, dos quatro restantes, um não
+  converge. Os quatro que ajustam concordam em sinal e magnitude com o teste no
+  nível da semente ($-15{,}1$~pp com $p = 0{,}007$ e $-11{,}7$~pp com
+  $p = 0{,}004$ contra o DeiT-Tiny; $+1{,}1$~pp com $p = 0{,}32$ e $-1{,}5$~pp
+  com $p = 0{,}22$ contra a ResNet-18), e com erros-padrão \emph{maiores} em
+  todas as comparações: de $0{,}77$ a $1{,}23$~pp, contra $0{,}11$ a
+  $0{,}74$~pp no teste principal. A sensibilidade, portanto, não apenas deixa
+  de contradizer o teste do nível da semente como mostra que ele já é o mais
+  exigente dos dois.
 \end{description}
 
 As diferenças por célula continuam sendo reportadas, com intervalo de
@@ -613,13 +628,35 @@ da análise: a retenção sob rotação contra cada linha de base nos dois
 conjuntos, e $\Delta_f$ contra a ResNet-18 nos dois conjuntos. A correção de
 Holm é aplicada a essas seis, e \emph{todo} valor de $p$ citado no texto, nas
 tabelas e na conclusão é o valor corrigido, identificado como
-$p_{\text{Holm}}$. As diferenças contra o DeiT-Tiny permanecem significativas
-($p_{\text{Holm}} < 10^{-11}$); a desvantagem capsular sob rotação no D-Fire
-fica em $p_{\text{Holm}} = 0{,}052$, e as demais entre $0{,}24$ e $0{,}26$.
-As comparações célula a célula da Seção~\ref{sec:res:wins} são descritivas e
-não recebem teste.
-% PREENCHER: recalcular os p no nível da semente e pelo modelo misto com o
-% script reanalise_estatistica.py e substituir os valores acima.
+$p_{\text{Holm}}$. A Tabela~\ref{tab:stats-holm} traz as seis. As diferenças contra o DeiT-Tiny
+permanecem significativas; a desvantagem capsular sob rotação no D-Fire fica
+logo acima do limiar; as demais não se aproximam dele. As comparações célula a
+célula da Seção~\ref{sec:res:wins} são descritivas e não recebem teste.
+
+\begin{table}[t]
+  \centering
+  \caption{As seis comparações pré-fixadas de H1 e H2, na unidade de análise da
+  Seção~\ref{sec:protocol:stats:unit}. $\Delta$ é a diferença média entre o
+  Efficient-CapsNet e a linha de base, agregada dentro de cada semente; $n = 3$
+  em todas.}
+  \label{tab:stats-holm}
+  \small
+  \begin{tabular}{llrrrr}
+    \toprule
+    Hip. & Comparação & $\Delta$ (pp) & IC 95\% & $p$ & $p_{\text{Holm}}$ \\
+    \midrule
+    \multirow{4}{*}{H1}
+      & CIFAR-10, vs.\ DeiT-Tiny & $-15{,}07$ & $[-18{,}26;\,-11{,}87]$ & 0,0024 & \textbf{0,012} \\
+      & CIFAR-10, vs.\ ResNet-18 & $+1{,}08$  & $[-0{,}27;\,+2{,}44]$   & 0,0748 & 0,225 \\
+      & D-Fire, vs.\ DeiT-Tiny   & $-11{,}73$ & $[-12{,}22;\,-11{,}25]$ & 0,0001 & \textbf{0,001} \\
+      & D-Fire, vs.\ ResNet-18   & $-1{,}48$  & $[-2{,}29;\,-0{,}66]$   & 0,0162 & 0,065 \\
+    \midrule
+    \multirow{2}{*}{H2}
+      & CIFAR-10, vs.\ ResNet-18 & $-1{,}01$  & $[-2{,}79;\,+0{,}77]$   & 0,1339 & 0,268 \\
+      & D-Fire, vs.\ ResNet-18   & $-1{,}29$  & $[-3{,}83;\,+1{,}26]$   & 0,1616 & 0,268 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 % ---------------------------------------------------------------------
 \section{Reprodutibilidade}
@@ -685,5 +722,21 @@ entropia cruzada. A diferença confunde a comparação arquitetural. Ela também
 não aos componentes capsulares, boa parte da robustez creditada às cápsulas.
 Treinar as linhas de base com a mesma perda isolaria o efeito; essa variante
 não foi executada.
+
+\item[Capacidade não pareada.]
+As três arquiteturas são usadas na configuração padrão de suas famílias, e o
+desnível é grande (Tabela~\ref{tab:model-complexity}): a ResNet-18 tem cerca de
+$2{,}8$ vezes os parâmetros do Efficient-CapsNet e o DeiT-Tiny cerca de
+$1{,}4$ vez, enquanto o caminho de classificação capsular tem cerca de
+$0{,}16$~M. Nenhuma diferença de desempenho observada pode ser atribuída ao
+viés indutivo sem que a capacidade esteja junto.
+
+\item[Hiperparâmetros não ajustados.]
+A configuração da Tabela~\ref{tab:hyperparams} vem da implementação de
+referência do Efficient-CapsNet e nenhuma busca foi feita
+(Seção~\ref{sec:protocol:budget}). A direção do viés é conhecida e favorece o
+modelo capsular, o que torna o resultado observado informativo apesar da
+limitação; mas a comparação não responde a qual arquitetura é melhor quando
+cada uma é ajustada ao seu melhor.
 
 \end{description}
