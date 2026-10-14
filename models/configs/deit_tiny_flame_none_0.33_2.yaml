@@ -1,0 +1,79 @@
+main:
+  name: deit_tiny_flame
+  seed: 2
+  cuda: true
+  verbosity: 0
+arch:
+  type: TimmClassifier
+  args:
+    model_name: deit_tiny_patch16_224
+    num_classes: 2
+    pretrained: false
+    patch_size: 16
+    img_size: 224
+loss:
+  type: ClassificationLoss
+  args: {}
+data_loader:
+  type: FlameDataLoader
+  args:
+    data_dir: ../Flame-1-26-08-26/
+    batch_size: 16
+    shuffle: true
+    training: true
+    img_size: 224
+    validation_split: 0.1
+    num_workers: 1
+    augmentation: none
+    val_split_mode: tail
+    block_size: 150
+    block_buffer: 1
+    clean_validation: true
+    data_fraction: 0.33
+optimizer:
+  type: Adam
+  args:
+    lr: 0.0005
+lr_scheduler:
+  type: ExponentialLR
+  args:
+    gamma: 0.98
+metrics:
+- accuracy
+trainer:
+  epochs: 100
+  log_step: 1700
+  save_dir: saved/
+  save_period: 10
+  verbosity: 0
+  monitor: min val_loss
+  early_stop: -5
+  tensorboard: true
+logger:
+  version: 1
+  disable_existing_loggers: false
+  formatters:
+    brief:
+      format: '%(message)s'
+    precise:
+      format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+      datefmt: '%Y-%m-%d %H:%M:%S'
+  handlers:
+    console:
+      class: logging.StreamHandler
+      level: DEBUG
+      formatter: brief
+      stream: ext://sys.stdout
+    file:
+      class: logging.handlers.RotatingFileHandler
+      level: INFO
+      formatter: precise
+      filename: info.log
+      maxBytes: 1000000.0
+      backupCount: 5
+      encoding: utf8
+  root:
+    level: INFO
+    handlers:
+    - console
+    - file
