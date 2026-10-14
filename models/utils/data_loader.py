@@ -14,6 +14,8 @@ from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 from torchvision import datasets, transforms
 
+from .augmentations import build_transform
+
 
 class BaseDataLoader(DataLoader):
     """Custom base class for all data loaders. Inherits from PyTorch DataLoader.
@@ -351,7 +353,7 @@ class Cifar10DataLoader(BaseDataLoader):
         training: bool = True,
         augmentation: str = "standard",
         data_fraction: float = 1.0,
-
+        clean_validation: bool = True,
     ):
         """Initializes the Cifar10DataLoader with the given parameters.
 
@@ -382,6 +384,13 @@ class Cifar10DataLoader(BaseDataLoader):
                 data to actually use -- e.g. 0.25 trains on 25% of the
                 training split. Ignored when training=False (the test/eval
                 split is always used in full). Defaults to 1.0.
+            clean_validation (bool, optional): Evaluate the carved-out
+                validation samples with the normalize-only transform instead
+                of the training augmentation (same behaviour and default as
+                DFireDataLoader), so val_loss and checkpoint selection are
+                measured on clean images. Set False to reproduce the older
+                behaviour of validating through the training augmentation.
+                Defaults to True.
         """
         self.num_classes = 10
 
@@ -392,15 +401,11 @@ class Cifar10DataLoader(BaseDataLoader):
                 f"Expected one of {self.AUGMENTATION_LEVELS}."
             )
 
-        if training:
-            image_transform = self._build_train_transform(augmentation)
-        else:
-            image_transform = transforms.Compose(
-                [
-                    transforms.ToTensor(),
-                    transforms.Normalize(self.CIFAR10_MEAN, self.CIFAR10_STD),
-                ]
-            )
+        # one shared pipeline builder for every dataset (see augmentations.py)
+        image_transform = build_transform(
+            augmentation if training else "none", 32,
+            self.CIFAR10_MEAN, self.CIFAR10_STD,
+        )
 
         label_transform = transforms.Lambda(self.one_hot_encode)
 
@@ -412,180 +417,18 @@ class Cifar10DataLoader(BaseDataLoader):
             target_transform=label_transform,
         )
 
-        super().__init__(
-            self.dataset, batch_size, shuffle, validation_split, num_workers,
-            data_fraction=data_fraction if training else 1.0,
-        )
-
-    def _build_train_transform(self, augmentation: str) -> transforms.Compose:
-        """Build the training-time augmentation pipeline for a given level."""
-        ops = []
-
-        if augmentation in ("standard", "strong"):
-            ops += [
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(15),  # +/- 15 degrees
-            ]
-
-        if augmentation == "strong":
-            ops.append(transforms.RandAugment())  # operates on PIL images
-
-        ops += [
-            transforms.ToTensor(),
-            transforms.Normalize(self.CIFAR10_MEAN, self.CIFAR10_STD),
-        ]
-
-        if augmentation == "strong":
-            ops.append(transforms.RandomErasing())  # operates on tensors
-
-        return transforms.Compose(ops)
-
-    def one_hot_encode(self, label: int) -> torch.Tensor:
-        """Transforms the given label into a one-hot encoded tensor."""
-        one_hot = torch.zeros(self.num_classes)
-        one_hot[label] = 1
-        return one_hot
-
-
-class FlameDataLoader(BaseDataLoader):
-    """Data loader for the FLAME wildfire-image dataset (binary Fire / No_Fire).
-
-    Expects `data_dir` to be the dataset root with this on-disk layout
-    (standard `torchvision.datasets.ImageFolder` layout, one subfolder per
-    class):
-
-        <data_dir>/
-            Training/
-                Fire/*.jpg
-                No_Fire/*.jpg
-            Test/
-                Fire/*.jpg
-                No_Fire/*.jpg
-
-    `training=True` loads the `Training/` split (with augmentation, and
-    optionally further divided into train/validation via
-    `validation_split`, same convention as the other loaders in this
-    module); `training=False` loads the `Test/` split (center-cropped/
-    resized only, no augmentation).
-
-    Images are natively 254x254 RGB jpgs. `img_size` controls what they're
-    resized to before augmentation/normalization -- this must match the
-    `input_size` (H, W) passed to the model's `arch.args` in config.yaml,
-    since e.g. EfficientCapsNet's PrimaryCaps kernel size is derived from
-    that input size. Defaults to 224 (the ImageNet-standard resolution,
-    also required by patch-based ViT/DeiT backbones since it must divide
-    evenly by patch_size), but any value from ~32 up to the native 254 is
-    supported; smaller sizes train faster (see the compute-cost note in
-    model.EfficientCapsNet), and 254 itself skips resizing entirely.
-
-    Classes are alphabetically ordered by `ImageFolder`, so the one-hot
-    label layout is index 0 = "Fire", index 1 = "No_Fire" (`self.classes`
-    reflects this and can be used to double check).
-
-    Attributes:
-        num_classes (int): Number of classes (2: Fire, No_Fire).
-        classes (list[str]): Class names in one-hot index order.
-        img_size (int): Side length images are resized to before use.
-        dataset (Dataset): The underlying ImageFolder dataset.
-    """
-
-    # Standard ImageNet stats -- a reasonable default for real photographic
-    # RGB images like FLAME's, absent dataset-specific computed stats.
-    FLAME_MEAN = (0.485, 0.456, 0.406)
-    FLAME_STD = (0.229, 0.224, 0.225)
-
-    AUGMENTATION_LEVELS = ("none", "standard", "strong")
-
-    def __init__(
-        self,
-        data_dir: str,
-        batch_size: int,
-        shuffle: bool = True,
-        validation_split: int | float = 0.0,
-        num_workers: int = 1,
-        training: bool = True,
-        img_size: int = 224,
-        augmentation: str = "standard",
-        data_fraction: float = 1.0,
-    ):
-        """Initializes the FlameDataLoader with the given parameters.
-
-        Args:
-            data_dir (str): Path to the FLAME dataset root (the directory
-                containing `Training/` and `Test/`).
-            batch_size (int): Number of samples per batch.
-            shuffle (bool, optional): Whether to shuffle the data every
-                epoch. Defaults to True.
-            validation_split (int | float, optional): If float, fraction of
-                the `Training` split to hold out for validation. If int,
-                the exact number of samples. Only meaningful when
-                `training=True`. Defaults to 0.0.
-            num_workers (int, optional): Number of subprocesses for data
-                loading. Defaults to 1.
-            training (bool, optional): If True, loads `data_dir/Training`
-                (augmented). If False, loads `data_dir/Test` (no
-                augmentation, `validation_split`/`data_fraction` ignored).
-                Defaults to True.
-            img_size (int, optional): Side length (pixels) images are
-                resized to -- must match the model's configured
-                `input_size`. Defaults to 224. Pass 254 to skip resizing
-                and train at native resolution instead.
-            augmentation (str, optional): Training-time augmentation
-                regime: "none" (resize + normalize only), "standard"
-                (random resized crop + horizontal flip + small rotation),
-                or "strong" (standard + color jitter + RandAugment +
-                Random Erasing). Ignored when `training=False`. Defaults
-                to "standard".
-            data_fraction (float, optional): Fraction (0, 1] of the
-                training split to actually use. Ignored when
-                `training=False`. Defaults to 1.0.
-        """
-        self.num_classes = 2
-        self.img_size = img_size
-
-        augmentation = augmentation.lower()
-        if augmentation not in self.AUGMENTATION_LEVELS:
-            raise ValueError(
-                f"Unknown augmentation level '{augmentation}'. "
-                f"Expected one of {self.AUGMENTATION_LEVELS}."
-            )
-
-        split_dir = Path(data_dir) / ("Training" if training else "Test")
-        if not split_dir.is_dir():
-            raise FileNotFoundError(
-                f"Expected a '{'Training' if training else 'Test'}' folder "
-                f"under '{data_dir}' (with 'Fire'/'No_Fire' subfolders), "
-                f"but '{split_dir}' does not exist."
-            )
-
-        if training:
-            image_transform = self._build_train_transform(augmentation)
-        else:
-            image_transform = transforms.Compose(
-                [
-                    transforms.Resize((img_size, img_size)),
-                    transforms.ToTensor(),
-                    transforms.Normalize(self.FLAME_MEAN, self.FLAME_STD),
-                ]
-            )
-
-        label_transform = transforms.Lambda(self.one_hot_encode)
-
-        self.dataset = datasets.ImageFolder(
-            str(split_dir),
-            transform=image_transform,
-            target_transform=label_transform,
-        )
-        self.classes = self.dataset.classes
-        if self.classes != ["Fire", "No_Fire"]:
-            # ImageFolder sorts subfolder names alphabetically; this should
-            # always hold for the documented layout, but flag loudly if a
-            # differently-named/ordered folder set sneaks in, since the
-            # one-hot index convention documented above depends on it.
-            raise ValueError(
-                f"Expected classes ['Fire', 'No_Fire'] under '{split_dir}', "
-                f"found {self.classes}."
+        # a second view of the same train set, unaugmented -- the validation
+        # sampler indexes into this one (same file order, so same indices)
+        self._clean_dataset = None
+        if training and clean_validation:
+            self._clean_dataset = datasets.CIFAR10(
+                data_dir,
+                train=True,
+                download=True,
+                transform=build_transform(
+                    "none", 32, self.CIFAR10_MEAN, self.CIFAR10_STD
+                ),
+                target_transform=label_transform,
             )
 
         super().__init__(
@@ -593,36 +436,13 @@ class FlameDataLoader(BaseDataLoader):
             data_fraction=data_fraction if training else 1.0,
         )
 
-    def _build_train_transform(self, augmentation: str) -> transforms.Compose:
-        """Build the training-time augmentation pipeline for a given level.
-
-        Deliberately uses a plain `Resize` rather than `RandomResizedCrop`
-        for every level, including "standard"/"strong" -- a random crop
-        would randomly discard part of the frame before resizing, which
-        risks cutting out the very fire/smoke region a detector needs to
-        see. All augmentation here preserves the full frame instead.
-        """
-        ops = [transforms.Resize((self.img_size, self.img_size))]
-
-        if augmentation in ("standard", "strong"):
-            ops += [
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(15),  # +/- 15 degrees
-            ]
-
-        if augmentation == "strong":
-            ops.append(transforms.ColorJitter(brightness=0.3, contrast=0.3))
-            ops.append(transforms.RandAugment())  # operates on PIL images
-
-        ops += [
-            transforms.ToTensor(),
-            transforms.Normalize(self.FLAME_MEAN, self.FLAME_STD),
-        ]
-
-        if augmentation == "strong":
-            ops.append(transforms.RandomErasing())  # operates on tensors
-
-        return transforms.Compose(ops)
+    def split_validation(self):
+        """Get the validation set, evaluated without augmentation if enabled."""
+        if self.valid_sampler is not None and self._clean_dataset is not None:
+            kwargs = dict(self.init_kwargs)
+            kwargs["dataset"] = self._clean_dataset
+            return DataLoader(sampler=self.valid_sampler, **kwargs)
+        return super().split_validation()
 
     def one_hot_encode(self, label: int) -> torch.Tensor:
         """Transforms the given label into a one-hot encoded tensor."""
@@ -1187,45 +1007,26 @@ class DFireDataLoader(BaseDataLoader):
 
     def _build_eval_transform(self) -> transforms.Compose:
         """Resize + normalize only -- no augmentation."""
-        return transforms.Compose(
-            [
-                transforms.Resize((self.img_size, self.img_size)),
-                transforms.ToTensor(),
-                transforms.Normalize(self.DFIRE_MEAN, self.DFIRE_STD),
-            ]
+        return build_transform(
+            "none", self.img_size, self.DFIRE_MEAN, self.DFIRE_STD, resize=True
         )
 
     def _build_train_transform(self, augmentation: str) -> transforms.Compose:
         """Build the training-time augmentation pipeline for a given level.
 
-        Mirrors FlameDataLoader exactly so the two fire datasets stay
-        directly comparable, including its deliberate use of a plain
-        `Resize` rather than `RandomResizedCrop`: a random crop could
-        remove the only fire/smoke region in the frame and silently
-        mislabel the sample, which matters even more here, since D-Fire's
-        boxes are often small.
+        Delegates to `build_transform`, the same builder Cifar10DataLoader
+        uses, so the three regimes are identical across datasets: standard =
+        random crop (padding = img_size / 8, i.e. 28 px at 224) + horizontal
+        flip + rotation +/-15 deg; strong = standard + RandAugment + Random
+        Erasing. The crop only translates the frame by at most 12.5% of its
+        side (it never rescales or cuts to a sub-window), so unlike
+        RandomResizedCrop it is very unlikely to remove the only fire/smoke
+        region of an image.
         """
-        ops = [transforms.Resize((self.img_size, self.img_size))]
-
-        if augmentation in ("standard", "strong"):
-            ops += [
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(15),  # +/- 15 degrees
-            ]
-
-        if augmentation == "strong":
-            ops.append(transforms.ColorJitter(brightness=0.3, contrast=0.3))
-            ops.append(transforms.RandAugment())  # operates on PIL images
-
-        ops += [
-            transforms.ToTensor(),
-            transforms.Normalize(self.DFIRE_MEAN, self.DFIRE_STD),
-        ]
-
-        if augmentation == "strong":
-            ops.append(transforms.RandomErasing())  # operates on tensors
-
-        return transforms.Compose(ops)
+        return build_transform(
+            augmentation, self.img_size, self.DFIRE_MEAN, self.DFIRE_STD,
+            resize=True,
+        )
 
     def one_hot_encode(self, label: int) -> torch.Tensor:
         """Transforms the given label into a one-hot encoded tensor."""

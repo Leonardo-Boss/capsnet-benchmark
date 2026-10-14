@@ -1,36 +1,42 @@
-%!TeX root = ../principal.tex
+%!TeX root = ../qualificacao.tex
 %!TeX encoding = utf-8
 \chapter{Introdução}
 \label{ch:introducao}
-As redes de cápsulas prometem equivariância. A propriedade vem da forma como a cápsula representa uma entidade: a orientação do vetor codifica a pose. Com a pose explícita, a rede aprende a relação entre as características detectadas nas cápsulas primárias. Dessa relação viria a resistência a rotações e a outras transformações ausentes do treinamento.
 
-A promessa é de 2017. Desde então, augmentação e regularização deram aos modelos convolucionais e de atenção boa parte da tolerância que se atribuía à arquitetura. Fica a dúvida se a vantagem das cápsulas ainda existe.
+As redes de cápsulas prometem equivariância. A propriedade vem da forma como a
+cápsula representa uma entidade: a orientação do vetor codifica a pose, e a
+rede aprende a relação entre as partes detectadas nas cápsulas primárias. Dessa
+relação viria a resistência a rotações e a outras transformações ausentes do
+treinamento, e também a necessidade de menos dados.
 
-Para esclarecer essa dúvida, este trabalho compara três arquiteturas: Efficient-CapsNet, ResNet-18 e DeiT-Tiny. Treinamos as três do zero em CIFAR-10 e D-Fire, sob três regimes de augmentação (nenhuma, padrão, forte), três frações de dados (33\%, 66\%, 100\%) e três sementes.
+A promessa é de 2017. Desde então, augmentação e regularização deram aos
+modelos convolucionais e de atenção boa parte da tolerância que se atribuía à
+arquitetura. Fica a dúvida se a vantagem das cápsulas ainda existe.
 
-As três arquiteturas são comparadas sob uma configuração compartilhada: os
-mesmos hiperparâmetros, as mesmas sementes, as mesmas partições e o mesmo
-número de épocas, com o custo de cada treino reportado à parte. Configuração
-compartilhada não é o mesmo que condição igualmente adequada. Os
+Para esclarecê-la, este trabalho compara três arquiteturas --- Efficient-CapsNet,
+ResNet-18 e DeiT-Tiny --- treinadas do zero em CIFAR-10 e em uma versão binária
+do D-Fire, sob três regimes de augmentação, três frações de dados e três
+sementes, num total de 162 treinos. As três são comparadas sob uma configuração
+compartilhada: mesmos hiperparâmetros, sementes, partições e número de épocas.
+Configuração compartilhada não é o mesmo que condição igualmente adequada: os
 hiperparâmetros vêm da implementação de referência do Efficient-CapsNet, as
-funções objetivo diferem --- perda de margem com reconstrução contra entropia
-cruzada --- e as capacidades não estão pareadas. O protocolo, portanto,
-responde a ``como estas três arquiteturas se comportam sob uma mesma
-configuração'', e não a ``qual arquitetura é melhor quando cada uma é ajustada
-ao seu melhor''. Essa distinção é retomada nas
-Seções~\ref{sec:protocol:budget} e~\ref{sec:protocol:threats}.
+funções objetivo diferem e as capacidades não estão pareadas. O protocolo
+responde, portanto, a ``como estas arquiteturas se comportam sob uma mesma
+configuração'', e não a ``qual é melhor quando cada uma é ajustada ao seu
+melhor''.
 
-O que este trabalho mede, porém, é robustez, e não equivariância. Uma rede é
-equivariante a um grupo de transformações quando transformar a entrada
-corresponde a uma transformação previsível da representação interna,
-$\Phi(T_g x) = T'_g \Phi(x)$, na formulação de Cohen e
-Welling~\cite{cohen2016group}. Preservar a acurácia depois de uma
-transformação é uma consequência possível dessa propriedade, mas pode ser
-obtida por outros meios --- por invariância aprendida a partir de dados
-aumentados, por exemplo. Avaliamos cada modelo sob transformações que ele nunca
-viu e medimos quanto da acurácia limpa cada arquitetura preserva, em termos
-absolutos e acima do acaso. Isso caracteriza a robustez da classificação; a
-equivariância das representações internas não é medida aqui, e a distinção é
+O que se mede é robustez, e não equivariância. Uma rede é equivariante a um
+grupo de transformações quando transformar a entrada corresponde a uma
+transformação previsível da representação, $\Phi(T_g x) = T'_g \Phi(x)$~\cite{cohen2016group}.
+Preservar a acurácia sob transformação é uma consequência possível dessa
+propriedade, mas pode ser obtida por outros meios, como a invariância aprendida
+a partir de dados aumentados. Este trabalho avalia a robustez da classificação;
+a equivariância das representações internas não é medida, e a distinção é
 mantida em todo o texto.
 
-O trabalho está organizado da seguinte forma. O Capítulo~\ref{ch:revisao} revisa a literatura sobre cápsulas e a controvérsia sobre sua robustez. O Capítulo~\ref{cap3} descreve as três arquiteturas e as adaptações feitas em cada uma. O Capítulo~\ref{ch:protocol} detalha as perguntas de pesquisa, as hipóteses e o protocolo experimental. O Capítulo~\ref{ch:results} apresenta e discute os resultados, e o Capítulo~\ref{ch:conclusao} responde às perguntas e aponta trabalhos futuros.
+Este documento de qualificação apresenta o estado atual do trabalho. O
+Capítulo~\ref{ch:revisao} revisa a literatura, o Capítulo~\ref{cap3} descreve
+as arquiteturas, o Capítulo~\ref{ch:protocol} detalha hipóteses e protocolo, o
+Capítulo~\ref{ch:results} apresenta os resultados da grade completa e o
+Capítulo~\ref{ch:conclusao} resume as conclusões parciais e o plano de trabalho
+até a defesa.

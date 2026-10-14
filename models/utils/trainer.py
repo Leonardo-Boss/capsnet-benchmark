@@ -69,6 +69,7 @@ class BaseTrainer:
         )
         self.log_step: int = cfg_trainer["log_step"]
         self.save_period: int = cfg_trainer["save_period"]
+        self.save_checkpoints: bool = cfg_trainer.get("save_checkpoints", True)
         self.checkpoint_dir = config.save_dir
 
         # configuration to monitor model performance and save best
@@ -188,6 +189,8 @@ class BaseTrainer:
             save_periodic (bool, optional): Whether to save the regular,
                 epoch-numbered checkpoint file. Defaults to True.
         """
+        if not self.save_checkpoints:
+            return
         arch = type(self.model).__name__
         state = {
             "arch": arch,

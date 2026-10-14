@@ -1,136 +1,68 @@
-%!TeX root = ../principal.tex
+%!TeX root = ../qualificacao.tex
 %!TeX encoding = utf-8
 \chapter{Modelos}
 \label{cap3}
-Comparamos três famílias de modelos representativas, que incorporam diferentes vieses indutivos:
 
-\begin{itemize}
+Comparamos três famílias com vieses indutivos distintos: redes de cápsulas
+(Efficient-CapsNet~\cite{mazzia2021efficient}), com vieses de equivariância e
+de hierarquia parte-todo~\cite{sabour2017dynamic}; CNNs residuais
+(ResNet-18~\cite{he2016resnet}), com o viés dominante de equivariância à
+translação; e transformadores de visão
+(DeiT-Tiny~\cite{dosovitskiy2021vit,touvron2021deit}), com vieses mínimos. As
+três compartilham uma única interface de treino e avaliação; apenas a
+arquitetura e a função de perda diferem.
 
-    \item \textbf{Redes de Cápsulas (Efficient-CapsNet)} \citar{mazzia2021efficient}, projetadas com fortes vieses de equivariância e de hierarquia parte-todo \citar{sabour2017dynamic}, e historicamente apontadas como vantajosas em cenários com poucos dados e na robustez a transformações.
+\paragraph{Efficient-CapsNet.}
+O extrator tem quatro convoluções sem preenchimento, com normalização em lote e
+ReLU ($5\times5$/32, $3\times3$/64, $3\times3$/64 e $3\times3$/128 com passo 2).
+Uma convolução \emph{depthwise} com núcleo do tamanho do mapa remanescente gera
+16 cápsulas primárias de dimensão 8, normalizadas por \emph{squash}. A camada de
+roteamento substitui o roteamento iterativo por autoatenção não iterativa e
+produz uma cápsula de dimensão 16 por classe; a norma de cada uma é o escore da
+classe. Um decodificador totalmente conectado (512 e 1024 unidades) reconstrói a
+imagem como regularizador e concentra cerca de $3{,}7$~M parâmetros, mais de
+$95\%$ do total. No CIFAR-10 há ainda uma cápsula de fundo, nunca usada como
+alvo.
 
-    \item \textbf{CNNs Residuais (ResNet-18)} \citar{he2016resnet}, uma das arquiteturas convolucionais modernas mais amplamente utilizadas, representando o viés indutivo dominante de equivariância à translação e aprendizado hierárquico de características por meio de conexões residuais.
+Para as entradas de $224\times224$ do D-Fire foram feitas duas adaptações: um
+\emph{max-pooling} $2\times2$ após cada uma das três primeiras convoluções, que
+leva o mapa final a $12\times12$ posições (contra $11\times11$ no CIFAR-10), e a
+reconstrução em $32\times32$ ampliada por interpolação bilinear, o que evita uma
+última camada de cerca de 154~M parâmetros.
 
-    \item \textbf{Transformadores de Visão (DeiT-Tiny)} \citar{dosovitskiy2021vit,touvron2021deit}, arquiteturas com vieses indutivos incorporados mínimos, que dependem principalmente dos dados e de mecanismos de atenção.
-\end{itemize}
+\paragraph{ResNet-18.}
+Quatro estágios de blocos residuais básicos. No CIFAR-10, a convolução inicial
+$7\times7$ com passo 2 é trocada por $3\times3$ com passo 1, e o
+\emph{max-pooling} inicial é removido; no D-Fire, o extrator original é mantido.
 
-As três arquiteturas cabem em uma única GPU de 6\,GB e são usadas na
-configuração padrão de cada família, sem pareamento de capacidade. O desnível
-que resulta é grande: a ResNet-18 tem cerca de $2{,}8$ vezes os parâmetros do
-Efficient-CapsNet, e o DeiT-Tiny cerca de $1{,}4$ vez
-(Tabela~\ref{tab:model-complexity}). Considerando apenas o extrator e as
-cápsulas, sem o decodificador de reconstrução, o modelo capsular tem cerca de
-$0{,}16$~M de parâmetros, dezenas de vezes menos que as linhas de base. As
-diferenças de desempenho, portanto, refletem o viés indutivo e a capacidade de
-cada arquitetura, sem que seja possível separar os dois.
+\paragraph{DeiT-Tiny.}
+Doze blocos, imersão de dimensão 192 e 3 cabeças, sem destilação (que exigiria
+um professor). Os \emph{patches} são de $4\times4$ no CIFAR-10 (64 tokens) e de
+$16\times16$ no D-Fire (196 tokens), com imersões posicionais aprendidas do zero.
 
-% ---------------------------------------------------------------------
-\section{Arquitetura e Modificações}
-\label{sec:protocol:models}
+\paragraph{Capacidade.}
+Não há pareamento de capacidade (Tabela~\ref{tab:model-complexity}). A
+ResNet-18 tem cerca de $2{,}8$ vezes os parâmetros do Efficient-CapsNet, e o
+DeiT-Tiny cerca de $1{,}4$ vez; sem o decodificador, o caminho de classificação
+capsular tem apenas cerca de $0{,}16$~M parâmetros. As diferenças de desempenho
+refletem, portanto, viés indutivo e capacidade, sem que seja possível separar os
+dois.
 
-As três arquiteturas são disponibilizadas por meio de uma única interface
-\texttt{forward(x,\allowbreak{} y\_true,\allowbreak{} mode)}, de modo que o treinador, a infraestrutura
-de registro e o sistema de avaliação sejam compartilhados integralmente entre
-os modelos; apenas a arquitetura e a função de perda diferem.
-
-\subsection{Efficient-CapsNet}
-\label{sec:protocol:models:ecaps}
-
-A rede capsular adotada segue a arquitetura Efficient-CapsNet
-\citar{mazzia2021efficient}. O extrator convolucional é composto por
-quatro camadas, todas seguidas de normalização em lote e ativação
-ReLU: uma convolução $5\times5$ com 32 canais, duas convoluções
-$3\times3$ com 64 canais e uma convolução $3\times3$ com 128 canais e
-passo 2. Nenhuma delas utiliza preenchimento, de modo que o mapa de
-características é progressivamente reduzido.
-
-A camada \textit{PrimaryCaps} converte esse mapa em cápsulas por meio
-de uma convolução \textit{depthwise} cujo núcleo tem exatamente as
-dimensões espaciais remanescentes do extrator, colapsando o mapa para
-$1\times1$; a saída é reorganizada em 16 cápsulas de dimensão 8 e
-normalizada pela função \textit{squash}. Em seguida, a camada
-\textit{RoutingCaps} substitui o roteamento iterativo por acordo por um
-mecanismo de autoatenção não iterativo: os vetores de predição são
-obtidos por um produto tensorial entre as cápsulas de entrada e a
-matriz de pesos $\mathbf{W} \in \mathbb{R}^{N_1 \times N_0 \times D_0
-\times D_1}$, e os coeficientes de acoplamento resultam da
-autossimilaridade entre esses vetores, escalonada por $\sqrt{D_1}$,
-seguida de \textit{softmax} e de um termo de viés aprendido. A saída
-consiste em uma cápsula de dimensão 16 por classe. Na configuração do
-CIFAR-10 há ainda uma cápsula de fundo, que nunca é alvo do treino e é
-descartada na classificação.
-% VERIFICAR: use_background_class=True nos YAML do CIFAR-10 e False (ou
-% ausente) nos do D-Fire. A contagem de parâmetros da
-% Tabela tab:model-complexity (3,94 M e 3,85 M) só fecha com essa combinação.
-
-O comprimento euclidiano de cada cápsula de saída é utilizado como
-escore da classe correspondente. Adicionalmente, um decodificador
-totalmente conectado (camadas de 512 e 1024 unidades, seguidas de uma
-projeção de $3\times32\times32$ saídas com ativação sigmoide) reconstrói a
-imagem a partir das cápsulas mascaradas pelo rótulo verdadeiro durante o
-treinamento, ou pela cápsula de maior comprimento durante a inferência. A
-perda de reconstrução atua como regularizador, conforme descrito na
-Seção~\ref{sec:protocol:training}. O decodificador concentra cerca de
-$3{,}7$~M dos parâmetros do modelo, mais de $95\%$ do total.
-
-Para entradas maiores que $32\times32$ foram necessárias duas adaptações.
-A primeira está no extrator. Sem ela, a única redução espacial seria o passo 2
-da última convolução, o mapa final teria $107\times107$ posições e o custo
-cresceria com o quadrado da resolução. Por isso inserimos um
-\textit{max-pooling} $2\times2$ após cada uma das três primeiras convoluções
-quando a entrada é de $224\times224$. O mapa final volta a ter $12\times12$
-posições, próximo das $11\times11$ da configuração original em $32\times32$,
-que permanece inalterada. O núcleo da convolução \textit{depthwise} das
-cápsulas primárias acompanha esse tamanho: $11\times11$ no CIFAR-10 e
-$12\times12$ no D-Fire.
-
-A segunda adaptação está no decodificador. Reconstruir diretamente em
-$3\times224\times224$ exigiria uma última camada com cerca de 154~M de
-parâmetros, dezenas de vezes o resto do modelo. No D-Fire, o decodificador
-reconstrói em $32\times32$, e a saída é ampliada por interpolação bilinear
-para $224\times224$ antes do cálculo da perda de reconstrução. O decodificador
-tem, assim, praticamente o mesmo tamanho nos dois conjuntos.
-% VERIFICAR: recon_size: 32 nos YAML do D-Fire (é o que a contagem de
-% 3,85 M parâmetros indica).
-
-Mesmo com essas adaptações, o custo capsular não escala como o das linhas de
-base: o número de operações do Efficient-CapsNet cresce cerca de nove vezes
-entre os dois conjuntos, contra três a quatro vezes para a ResNet-18 e o
-DeiT-Tiny (Tabela~\ref{tab:model-complexity}). A diferença é considerada na
-Seção~\ref{sec:protocol:threats}.
-
-\subsection{ResNet-18}
-\label{sec:protocol:models:resnet}
-
-A segunda arquitetura de referência é a ResNet-18 \citar{he2016resnet},
-composta por quatro estágios de blocos residuais básicos com dois
-caminhos convolucionais $3\times3$ cada, conexões de atalho por
-identidade e normalização em lote.
-
-Para as entradas de baixa resolução do CIFAR-10, adota-se a adaptação
-usual do extrator inicial: a convolução $7\times7$ com passo 2 é
-substituída por uma convolução $3\times3$ com passo 1 e preenchimento
-1, e a camada de \textit{max-pooling} subsequente é removida. Sem essa
-alteração, a imagem $32\times32$ seria reduzida a $8\times8$ antes do
-primeiro bloco residual, descartando informação espacial essencial. Os
-pesos da nova convolução são inicializados segundo a distribuição
-normal de He. No D-Fire, com entradas de $224\times224$, a resolução para
-a qual a arquitetura foi projetada, o extrator original é mantido.
-
-\subsection{DeiT-Tiny}
-\label{sec:protocol:models:deit}
-
-A terceira arquitetura é a DeiT-Tiny \citar{touvron2021deit}, um
-\textit{Vision Transformer} com 12 blocos, dimensão de imersão 192 e 3
-cabeças de atenção. A destilação por token proposta no trabalho
-original não é empregada aqui, uma vez que exigiria um modelo professor
-e comprometeria a comparação entre arquiteturas treinadas do zero.
-
-O tamanho do \textit{patch} é ajustado à resolução de cada conjunto de
-dados: \textit{patches} de $4\times4$ para as entradas $32\times32$ do
-CIFAR-10, resultando em 64 tokens, e \textit{patches} de $16\times16$
-para as entradas $224\times224$ do D-Fire, resultando em 196 tokens.
-Como o número de tokens do CIFAR-10 difere da configuração original da
-arquitetura, as imersões posicionais são reinstanciadas com as
-dimensões correspondentes e aprendidas do zero. Em ambos os conjuntos o
-modelo parte de inicialização aleatória, coerente com o protocolo de
-treinamento adotado para todos os modelos.
+\begin{table}[htb]
+  \centering
+  \caption{Complexidade dos modelos, medida com \texttt{ptflops}~\cite{ptflops}
+  em lote unitário. Para o Efficient-CapsNet os valores incluem o decodificador.}
+  \label{tab:model-complexity}
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    \multirow{2}{*}{Modelo} & \multicolumn{2}{c}{CIFAR-10} & \multicolumn{2}{c}{D-Fire} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+     & Params (M) & GMACs & Params (M) & GMACs \\
+    \midrule
+    Efficient-CapsNet & 3,94  & 0,049 & 3,85  & 0,458 \\
+    ResNet-18         & 11,17 & 0,558 & 11,18 & 1,825 \\
+    DeiT-Tiny         & 5,36  & 0,252 & 5,52  & 0,913 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

@@ -14,6 +14,30 @@ from utils.tools import find_latest_checkpoint
 from utils.profiling import log_model_complexity
 
 
+def build_lr_scheduler(cfg: Config, optimizer: torch.optim.Optimizer):
+    """Builds the LR scheduler from config.
+
+    Plain configs behave exactly as before (`cfg.init_obj`). If
+    `lr_scheduler.warmup_epochs` is set (> 0, ExponentialLR only), the LR
+    ramps linearly from 1/(w+1) of its base value up to the base value over
+    the first w epochs, then decays by `gamma` per epoch. A LambdaLR is used
+    (rather than SequentialLR) so there is a single scheduler to step.
+    """
+    sched_cfg = cfg["lr_scheduler"]
+    warmup = sched_cfg.get("warmup_epochs", 0)
+    if not warmup:
+        return cfg.init_obj("lr_scheduler", torch.optim.lr_scheduler, optimizer)
+
+    assert sched_cfg["type"] == "ExponentialLR", (
+        "warmup_epochs is only supported together with ExponentialLR"
+    )
+    gamma = sched_cfg["args"]["gamma"]
+    return torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lambda e: (e + 1) / (warmup + 1) if e < warmup else gamma ** (e - warmup),
+    )
+
+
 def main(cfg: Config) -> None:
     logger = get_logger(
         name="program", verbosity=cfg["main"]["verbosity"]
@@ -51,7 +75,7 @@ def main(cfg: Config) -> None:
     # build optimizer
     trainable_params = filter(lambda p: p.requires_grad, model.parameters())
     optimizer = cfg.init_obj("optimizer", torch.optim, trainable_params)
-    lr_scheduler = cfg.init_obj("lr_scheduler", torch.optim.lr_scheduler, optimizer)
+    lr_scheduler = build_lr_scheduler(cfg, optimizer)
 
     # get function handles of loss and metrics
     criterion = cfg.init_obj("loss", module_loss)
@@ -76,7 +100,7 @@ def main(cfg: Config) -> None:
     if ckpt_path is not None:
         trainer._resume_checkpoint(ckpt_path)
     else:
-        logger.info(f"No existing checkpoints found for {ckpt_path}; starting fresh.")
+        logger.info("No existing checkpoints found in %s; starting fresh.", cfg.save_dir)
 
     # reseed so augmentations are the same independent of the model
     torch.manual_seed(seed)

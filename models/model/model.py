@@ -258,11 +258,17 @@ class TimmClassifier(nn.Module):
             self._apply_cifar_stem()
 
     def _apply_cifar_stem(self):
-        if not hasattr(self.backbone, "conv1"):
+        if hasattr(self.backbone, "conv1"):          # ResNet family
+            self._cifar_stem_resnet()
+        elif hasattr(self.backbone, "conv_stem"):    # MobileNetV3 / EfficientNet family
+            self._cifar_stem_mobilenet()
+        else:
             raise ValueError(
-                "cifar_stem=True expects a ResNet-style model with a "
-                "'.conv1' stem (e.g. 'resnet18', 'resnet34', 'resnet50')."
+                "cifar_stem=True expects a ResNet ('.conv1') or MobileNet-style "
+                "('.conv_stem') backbone."
             )
+
+    def _cifar_stem_resnet(self):
         old_conv1 = self.backbone.conv1
         self.backbone.conv1 = nn.Conv2d(
             in_channels=old_conv1.in_channels,
@@ -278,6 +284,17 @@ class TimmClassifier(nn.Module):
         # replace the stride-2 maxpool with a no-op so 32x32 isn't
         # downsampled to 8x8 before the first residual block even runs
         self.backbone.maxpool = nn.Identity()
+
+    def _cifar_stem_mobilenet(self):
+        """Total stride 32 -> 8: 32x32 inputs end at 4x4 instead of 1x1."""
+        bb = self.backbone
+        bb.conv_stem.stride = (1, 1)
+        # also remove the first stride-2 conv inside the blocks
+        # (stage 0 for *_small, stage 1 for *_large)
+        for m in bb.blocks.modules():
+            if isinstance(m, nn.Conv2d) and m.stride == (2, 2):
+                m.stride = (1, 1)
+                break
 
     def forward(self, x, y_true=None, mode='train'):
         logits = self.backbone(x)

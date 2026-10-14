@@ -7,25 +7,26 @@ def update_recursive(d, u):
         else:
             d[k] = v
 
-# config = read_yaml('config.yaml')
-# ecaps = read_yaml('config-ecaps.yaml')
-# deit = read_yaml('config-deit-tiny.yaml')
-# resnet = read_yaml('config-resnet-18.yaml')
+config = read_yaml('config.yaml')
+ecaps = read_yaml('config-ecaps.yaml')
+deit = read_yaml('config-deit-tiny.yaml')
+resnet = read_yaml('config-resnet-18.yaml')
+mobilenet = read_yaml('config-mobilenetv3.yaml')
 # config = read_yaml('config-flame.yaml')
 # ecaps = read_yaml('config-ecaps-flame.yaml')
 # deit = read_yaml('config-deit-tiny-flame.yaml')
 # resnet = read_yaml('config-resnet-18-flame.yaml')
-config = read_yaml('config-dfire.yaml')
-ecaps = read_yaml('config-ecaps-dfire.yaml')
-deit = read_yaml('config-deit-dfire.yaml')
-resnet = read_yaml('config-resnet-dfire.yaml')
+# config = read_yaml('config-dfire.yaml')
+# ecaps = read_yaml('config-ecaps-dfire.yaml')
+# deit = read_yaml('config-deit-dfire.yaml')
+# resnet = read_yaml('config-resnet-dfire.yaml')
+# mobilenet = read_yaml('config-mobilenetv3-dfire.yaml')
 
-models = (ecaps, deit, resnet,)
-# models = (ecaps,)
+models = (ecaps, deit, resnet, mobilenet)
 databases = (
-        # {'name':'cifar_10', 'type':'Cifar10DataLoader'},
+        {'name':'cifar_10', 'type':'Cifar10DataLoader'},
         # {'name':'flame', 'type':'FlameDataLoader'},
-        {'name':'dfire', 'type':'DFireDataLoader'},
+        # {'name':'dfire', 'type':'DFireDataLoader'},
 )
 augmentations = (
     'none',
