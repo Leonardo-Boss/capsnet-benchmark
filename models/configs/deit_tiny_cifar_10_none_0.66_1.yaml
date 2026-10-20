@@ -25,13 +25,15 @@ data_loader:
     augmentation: none
     data_fraction: 0.66
 optimizer:
-  type: Adam
+  type: AdamW
   args:
     lr: 0.0005
+    weight_decay: 0.05
 lr_scheduler:
   type: ExponentialLR
   args:
     gamma: 0.98
+  warmup_epochs: 5
 metrics:
 - accuracy
 trainer:

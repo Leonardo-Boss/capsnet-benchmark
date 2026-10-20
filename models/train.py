@@ -12,6 +12,7 @@ from utils.trainer import MnistTrainer
 from utils.logger import get_logger
 from utils.tools import find_latest_checkpoint
 from utils.profiling import log_model_complexity
+from utils.eval_selection import split_fingerprint
 
 
 def build_lr_scheduler(cfg: Config, optimizer: torch.optim.Optimizer):
@@ -61,6 +62,8 @@ def main(cfg: Config) -> None:
     train_data_loader = cfg.init_obj("data_loader", module_data)
     valid_data_loader = train_data_loader.split_validation()
     logger.info("Data loaded   : %s", type(train_data_loader).__name__)
+    # identical across architectures for the same seed/fraction -> same partition
+    logger.info("Split hash    : %s", split_fingerprint(train_data_loader))
 
     # build model architecture
     model = cfg.init_obj("arch", module_arch)

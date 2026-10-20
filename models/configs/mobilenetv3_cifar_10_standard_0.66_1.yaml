@@ -24,9 +24,10 @@ data_loader:
     augmentation: standard
     data_fraction: 0.66
 optimizer:
-  type: Adam
+  type: AdamW
   args:
-    lr: 0.0005
+    lr: 0.001
+    weight_decay: 0.05
 lr_scheduler:
   type: ExponentialLR
   args:

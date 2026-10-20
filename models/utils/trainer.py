@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import datetime
 from abc import abstractmethod
@@ -12,6 +13,7 @@ import torch.nn.functional as F
 
 
 from .config import Config
+from .eval_selection import evaluate_loss, make_val_loaders
 from .logger import MetricTracker, TensorboardWriter, get_logger, CSVLogger, ConfusionTracker
 
 class BaseTrainer:
@@ -21,6 +23,12 @@ class BaseTrainer:
     up the model architecture, initializing the optimizer and loss function, and
     providing logging and visualization utilities. The class also supports
     monitoring model performance and saving the best model.
+
+    Checkpoint selection (A1): `model_best.pth` is the epoch with the best
+    *monitored* metric (config: 'min val_loss'), measured on clean,
+    deterministic validation. `model_best_aug.pth` is the epoch with the best
+    loss on a fixed-seed *augmented* view of the same validation indices.
+    Both are tracked every epoch, and `selection.json` records the epochs.
 
     Attributes:
         config (Config): The configuration object.
@@ -39,6 +47,9 @@ class BaseTrainer:
         monitor (str): The model performance monitoring mode.
         mnt_mode (str): The monitoring mode (min or max).
         mnt_best (float): The best monitored metric value.
+        best_epoch (int): Epoch at which mnt_best was reached.
+        best_aug (float): Best fixed-seed augmented validation loss.
+        best_aug_epoch (int): Epoch at which best_aug was reached.
     """
 
     def __init__(
@@ -71,6 +82,11 @@ class BaseTrainer:
         self.save_period: int = cfg_trainer["save_period"]
         self.save_checkpoints: bool = cfg_trainer.get("save_checkpoints", True)
         self.checkpoint_dir = config.save_dir
+
+        # alternative selection criterion, tracked in parallel (see class doc)
+        self.best_epoch = 0
+        self.best_aug = float("inf")
+        self.best_aug_epoch = 0
 
         # configuration to monitor model performance and save best
         self.monitor: str = cfg_trainer.get("monitor", "off")
@@ -140,6 +156,15 @@ class BaseTrainer:
 
             csv_logger.log(epoch_log)
 
+            # parallel criterion: best fixed-seed augmented validation loss.
+            # Done before the monitor block so an early-stop `break` below
+            # cannot skip it.
+            aug_loss = epoch_log.get("val_loss_aug")
+            if aug_loss is not None and aug_loss < self.best_aug:
+                self.best_aug = aug_loss
+                self.best_aug_epoch = epoch
+                self._save_named(epoch, "model_best_aug.pth")
+
             # monitor best performance and perform early stopping
             best = False
             if self.monitor != "off":
@@ -161,6 +186,7 @@ class BaseTrainer:
 
                 if improved:
                     self.mnt_best = epoch_log[self.mnt_metric]
+                    self.best_epoch = epoch
                     not_improved_count = 0
                     best = True
                 else:
@@ -178,6 +204,46 @@ class BaseTrainer:
             save_periodic = epoch % self.save_period == 0
             if best or save_periodic:
                 self._save_checkpoint(epoch, save_best=best, save_periodic=save_periodic)
+
+        self._write_selection()
+
+    def _write_selection(self) -> None:
+        """Record which epoch each selection criterion picked."""
+        def fin(v):
+            return None if v in (float("inf"), float("-inf")) else v
+
+        selection = {
+            "monitored": {
+                "metric": getattr(self, "mnt_metric", None),
+                "mode": getattr(self, "mnt_mode", None),
+                "epoch": self.best_epoch,
+                "value": fin(self.mnt_best),
+                "file": "model_best.pth",
+            },
+            "aug": {
+                "metric": "val_loss_aug",
+                "mode": "min",
+                "epoch": self.best_aug_epoch,
+                "value": fin(self.best_aug),
+                "file": "model_best_aug.pth",
+            },
+        }
+        with open(Path(self.checkpoint_dir) / "selection.json", "w") as f:
+            json.dump(selection, f, indent=2)
+        self.logger.info("Selection written: %s", selection)
+
+    def _save_named(self, epoch: int, fname: str) -> None:
+        """Save a weights-only checkpoint under an explicit file name."""
+        if not self.save_checkpoints:
+            return
+        state = {
+            "arch": type(self.model).__name__,
+            "epoch": epoch,
+            "state_dict": self.model.state_dict(),
+            "monitor_best": self.best_aug,
+        }
+        torch.save(state, str(self.checkpoint_dir / fname))
+        self.logger.info("Checkpoint saved: %s (epoch %d)", fname, epoch)
 
     def _save_checkpoint(self, epoch: int, save_best: bool = False, save_periodic: bool = True) -> None:
         """Save the current model checkpoint.
@@ -198,6 +264,9 @@ class BaseTrainer:
             "state_dict": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "monitor_best": self.mnt_best,
+            "best_epoch": self.best_epoch,
+            "best_aug": self.best_aug,
+            "best_aug_epoch": self.best_aug_epoch,
             "config": self.config,
         }
         if save_periodic:
@@ -214,8 +283,8 @@ class BaseTrainer:
         """Resume training from a saved checkpoint.
 
         Restores the model weights, optimizer state, the epoch to resume from,
-        and the best-monitored-metric-so-far, so training continues as if it
-        had never stopped.
+        and the best-metric bookkeeping for both selection criteria, so
+        training continues as if it had never stopped.
 
         Args:
             resume_path (str | Path): Path to the checkpoint file to resume from.
@@ -239,6 +308,9 @@ class BaseTrainer:
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.start_epoch = checkpoint["epoch"] + 1
         self.mnt_best = checkpoint.get("monitor_best", self.mnt_best)
+        self.best_epoch = checkpoint.get("best_epoch", self.best_epoch)
+        self.best_aug = checkpoint.get("best_aug", self.best_aug)
+        self.best_aug_epoch = checkpoint.get("best_aug_epoch", self.best_aug_epoch)
 
         self.logger.info(
             "Checkpoint loaded. Resuming training from epoch %d", self.start_epoch
@@ -257,12 +329,14 @@ class MnistTrainer(BaseTrainer):
         metric_fns (list[Any]): List of metric functions.
         train_data_loader (torch.utils.data.DataLoader): Training data loader.
         valid_data_loader (torch.utils.data.DataLoader, optional): Validation data
-            loader. Defaults to None.
+            loader (clean, fixed order). Defaults to None.
         lr_scheduler (torch.optim.lr_scheduler.LRScheduler, optional):
             Learning rate scheduler. Defaults to None.
         n_batch (int): Number of training steps (batches) in an epoch.
         train_metrics (MetricTracker): Training metric tracker.
         valid_metrics (MetricTracker): Validation metric tracker.
+        val_aug_loader (DataLoader | None): Fixed-seed augmented view of the
+            validation indices, used only for the parallel selection criterion.
     """
 
     def __init__(
@@ -285,6 +359,10 @@ class MnistTrainer(BaseTrainer):
         # data loader and metric configuration
         self.train_loader = train_data_loader
         self.valid_loader = valid_data_loader
+        self.val_aug_loader = None
+        if valid_data_loader is not None:
+            # (None when the loader has no carved-out split, e.g. official val)
+            _, self.val_aug_loader = make_val_loaders(train_data_loader)
         self.train_metrics = MetricTracker(
             "loss", *[m.__name__ for m in metric_fns], writer=self.writer
         )
@@ -371,6 +449,16 @@ class MnistTrainer(BaseTrainer):
             # add validation metrics to epoch log
             epoch_log.update(**{"val_" + k: v for k, v in val_log.items()})
 
+            # parallel selection criterion: same validation indices, training
+            # augmentation with a fixed per-sample seed (deterministic).
+            # Always present when a split exists, so the CSV header is stable.
+            if self.val_aug_loader is not None:
+                aug = evaluate_loss(
+                    self.model, self.val_aug_loader, self.criterion, self.device
+                )
+                epoch_log["val_loss_aug"] = aug["loss"]
+                epoch_log["val_accuracy_aug"] = aug["accuracy"]
+
         # update learning rate
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
@@ -379,6 +467,9 @@ class MnistTrainer(BaseTrainer):
 
     def _valid_epoch(self, epoch: int) -> dict:
         """Validate the model for one epoch.
+
+        Losses and metrics are weighted by batch size, so the smaller final
+        batch does not count as much as a full one.
 
         Args:
             epoch (int): The current epoch number.
@@ -395,6 +486,7 @@ class MnistTrainer(BaseTrainer):
                 # configure data and optimizer
                 images = images.to(self.device)
                 labels = labels.to(self.device)
+                n = images.shape[0]
 
                 # # forward and backward pass
                 out_images, out_labels = self.model(images, labels, mode="eval")
@@ -408,9 +500,9 @@ class MnistTrainer(BaseTrainer):
                 self.writer.set_step(
                     (epoch - 1) * len(self.valid_loader) + batch_idx, "valid"
                 )
-                self.valid_metrics.update("loss", loss.item())
+                self.valid_metrics.update("loss", loss.item(), n)
                 for metric in self.metric_fns:
-                    self.valid_metrics.update(metric.__name__, metric(label, out_label))
+                    self.valid_metrics.update(metric.__name__, metric(label, out_label), n)
 
                 pred_onehot = F.one_hot(out_label, num_classes=labels.shape[1])
                 self.valid_confusion.update(labels, pred_onehot)

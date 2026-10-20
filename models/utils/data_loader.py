@@ -137,12 +137,27 @@ class BaseDataLoader(DataLoader):
 
         return train_sampler, valid_sampler
 
+    def _make_val_loader(self, dataset=None):
+        """Validation loader with a FIXED order and a private RNG.
+
+        SubsetRandomSampler reshuffled the validation set every epoch; here the
+        sorted indices are iterated instead, and the private generator keeps
+        validation from consuming the global RNG that drives training
+        augmentation.
+        """
+        kwargs = dict(self.init_kwargs)
+        if dataset is not None:
+            kwargs["dataset"] = dataset
+        order = sorted(int(i) for i in self.valid_sampler.indices)
+        return DataLoader(
+            sampler=order, generator=torch.Generator().manual_seed(0), **kwargs
+        )
+
     def split_validation(self):
-        """Get the validation set if configured."""
+        """Get the validation set if configured (fixed order)."""
         if self.valid_sampler is None:
             return None
-        else:
-            return DataLoader(sampler=self.valid_sampler, **self.init_kwargs)
+        return self._make_val_loader()
 
 class MnistDataLoader(BaseDataLoader):
     """MNIST data loading class for Efficient CapsNet training.
@@ -439,9 +454,7 @@ class Cifar10DataLoader(BaseDataLoader):
     def split_validation(self):
         """Get the validation set, evaluated without augmentation if enabled."""
         if self.valid_sampler is not None and self._clean_dataset is not None:
-            kwargs = dict(self.init_kwargs)
-            kwargs["dataset"] = self._clean_dataset
-            return DataLoader(sampler=self.valid_sampler, **kwargs)
+            return self._make_val_loader(self._clean_dataset)
         return super().split_validation()
 
     def one_hot_encode(self, label: int) -> torch.Tensor:
@@ -999,9 +1012,8 @@ class DFireDataLoader(BaseDataLoader):
             return DataLoader(**kwargs)
 
         if self.valid_sampler is not None and self._clean_dataset is not None:
-            kwargs = dict(self.init_kwargs)
-            kwargs["dataset"] = self._clean_dataset  # same indices, no augmentation
-            return DataLoader(sampler=self.valid_sampler, **kwargs)
+            # same indices, no augmentation, fixed order
+            return self._make_val_loader(self._clean_dataset)
 
         return super().split_validation()
 

@@ -32,6 +32,7 @@ from utils.data_loader import (
 from utils.logger import get_logger
 from utils.tools import read_yaml
 from utils.unseen_transforms import UNSEEN_TRANSFORMS
+from utils.eval_selection import FixedAugmentDataset
 
 
 # Maps the loader class named in the config to everything the eval path
@@ -308,6 +309,11 @@ def main():
     parser.add_argument("--data_dir", default=None, help="override data_dir from config")
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_workers", type=int, default=1)
+    parser.add_argument(
+        "--eval_seed", type=int, default=0,
+        help="test-time transformations are seeded per image index with this "
+             "value, so every model sees the same random transformation per image",
+    )
     parser.add_argument("--output_dir", default="results", help="directory to write the CSV into")
     parser.add_argument(
         "--overwrite", action="store_true",
@@ -373,7 +379,10 @@ def main():
     img_size = resolve_img_size(spec, loader_args, cfg["arch"]["args"])
     transform = build_eval_transform(spec, args.augmentation, unseen_names, img_size)
     data_dir = args.data_dir or loader_args["data_dir"]
-    dataset = build_test_dataset(spec, loader_args, data_dir, transform)
+    dataset = FixedAugmentDataset(
+        build_test_dataset(spec, loader_args, data_dir, transform),
+        base_seed=args.eval_seed,
+    )
     loader = DataLoader(
         dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers
     )
